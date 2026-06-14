@@ -167,5 +167,60 @@ defmodule ElGraph.AGUITest do
 
       assert [%{"type" => "RUN_STARTED"}, %{"type" => "RUN_FINISHED"}] = events
     end
+
+    test "a tool call closes an open text message before TOOL_CALL_START" do
+      events =
+        [
+          el({:token, "thinking"}, :agent),
+          el({:tool_call, "c1", "search", %{q: "x"}}, :agent)
+        ]
+        |> AGUI.transform("t1", "r1")
+        |> Enum.to_list()
+
+      types = Enum.map(events, & &1["type"])
+      end_idx = Enum.find_index(types, &(&1 == "TEXT_MESSAGE_END"))
+      tool_idx = Enum.find_index(types, &(&1 == "TOOL_CALL_START"))
+      assert end_idx != nil and tool_idx != nil and end_idx < tool_idx
+    end
+  end
+
+  describe "additional event constructors" do
+    test "state_delta/1 builds STATE_DELTA with JSON Patch ops" do
+      ops = [%{"op" => "replace", "path" => "/answer", "value" => "42"}]
+      assert %{"type" => "STATE_DELTA", "delta" => ^ops} = AGUI.state_delta(ops)
+    end
+
+    test "messages_snapshot/1 builds MESSAGES_SNAPSHOT" do
+      msgs = [%{"role" => "assistant", "content" => "hi"}]
+      assert %{"type" => "MESSAGES_SNAPSHOT", "messages" => ^msgs} = AGUI.messages_snapshot(msgs)
+    end
+
+    test "custom/2 builds a CUSTOM event" do
+      assert %{"type" => "CUSTOM", "name" => "metric", "value" => %{tokens: 5}} =
+               AGUI.custom("metric", %{tokens: 5})
+    end
+  end
+
+  describe "encode/1 — single stream element (stateless best-effort)" do
+    test ":node_start maps to STEP_STARTED" do
+      assert {:ok, %{"type" => "STEP_STARTED", "stepName" => "search"}} =
+               AGUI.encode(%{event: :node_start, node: :search, step: 1})
+    end
+
+    test "{:token, t} maps to TEXT_MESSAGE_CONTENT with a messageId" do
+      assert {:ok, %{"type" => "TEXT_MESSAGE_CONTENT", "delta" => "hi", "messageId" => mid}} =
+               AGUI.encode(%{event: {:token, "hi"}, node: :agent, step: 2})
+
+      assert is_binary(mid)
+    end
+
+    test "{:done, {:ok, state}} maps to STATE_SNAPSHOT" do
+      assert {:ok, %{"type" => "STATE_SNAPSHOT", "snapshot" => %{a: 1}}} =
+               AGUI.encode(%{event: {:done, {:ok, %{a: 1}}}})
+    end
+
+    test "an unmappable element is ignored" do
+      assert :ignore = AGUI.encode(%{event: {:weird, :thing}, node: :n, step: 0})
+    end
   end
 end

@@ -38,6 +38,34 @@ defmodule ElGraph.AGUI do
   @spec state_snapshot(term()) :: event()
   def state_snapshot(snapshot), do: %{"type" => "STATE_SNAPSHOT", "snapshot" => snapshot}
 
+  @doc "STATE_DELTA 이벤트 — JSON Patch(RFC 6902) 연산 목록."
+  @spec state_delta([map()]) :: event()
+  def state_delta(ops) when is_list(ops), do: %{"type" => "STATE_DELTA", "delta" => ops}
+
+  @doc "MESSAGES_SNAPSHOT 이벤트 — 전체 메시지 목록 스냅샷."
+  @spec messages_snapshot([term()]) :: event()
+  def messages_snapshot(messages) when is_list(messages),
+    do: %{"type" => "MESSAGES_SNAPSHOT", "messages" => messages}
+
+  @doc "CUSTOM 이벤트 — 프레임워크 밖 임의 이벤트(메트릭 등)."
+  @spec custom(String.t(), term()) :: event()
+  def custom(name, value), do: %{"type" => "CUSTOM", "name" => name, "value" => value}
+
+  @doc """
+  단일 ElGraph 스트림 원소를 AG-UI 이벤트로 무상태 매핑한다(best-effort). 메시지 프레이밍이
+  필요 없는 경우용 — 완전한 시퀀스(START/END 프레이밍 포함)는 `transform/3`을 쓴다.
+  매핑 불가 원소는 `:ignore`.
+  """
+  @spec encode(map()) :: {:ok, event()} | :ignore
+  def encode(%{event: :node_start, node: node}), do: {:ok, step_started(node)}
+  def encode(%{event: :node_end, node: node}), do: {:ok, step_finished(node)}
+  def encode(%{event: {:token, delta}} = el), do: {:ok, text_content(el_message_id(el), delta)}
+  def encode(%{event: {:done, {:ok, state}}}), do: {:ok, state_snapshot(state)}
+  def encode(%{event: {:done, {:interrupted, info}}}), do: {:ok, state_snapshot(info)}
+  def encode(%{event: {:done, {:error, reason}}}), do: {:ok, run_error(format_error(reason))}
+  def encode(%{event: {:down, reason}}), do: {:ok, run_error(format_error(reason))}
+  def encode(_element), do: :ignore
+
   @doc """
   ElGraph 스트림(Enumerable of `%{event: ...}`)을 AG-UI 이벤트 시퀀스로 변환한다.
 
@@ -79,7 +107,9 @@ defmodule ElGraph.AGUI do
   end
 
   defp step(%{event: {:tool_call, id, name, args}}, acc) do
-    {[tool_call_start(id, name), tool_call_args(id, args), tool_call_end(id)], acc}
+    # 툴 호출은 진행 중 텍스트 메시지를 끊으므로 먼저 닫는다.
+    {close, acc} = close_open(acc)
+    {close ++ [tool_call_start(id, name), tool_call_args(id, args), tool_call_end(id)], acc}
   end
 
   defp step(%{event: {:done, result}}, acc), do: finish(result, acc)
@@ -127,6 +157,10 @@ defmodule ElGraph.AGUI do
   defp message_id(run_id, node, el) do
     step = Map.get(el, :step, 0)
     "#{run_id}-#{node}-#{step}"
+  end
+
+  defp el_message_id(el) do
+    "#{Map.get(el, :node, "msg")}-#{Map.get(el, :step, 0)}"
   end
 
   ## 이벤트 생성자

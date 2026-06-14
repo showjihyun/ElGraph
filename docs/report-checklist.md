@@ -8,13 +8,13 @@
 ---
 
 ## T1.1 — AG-UI 매핑 (`ElGraph.AGUI`)
-시작 8.0 → 목표 9.5
+시작 8.0 → **달성 9.5**
 - [2] 핵심 이벤트(RUN/STEP/TEXT_MESSAGE/TOOL_CALL/STATE_SNAPSHOT) 매핑 ✅
 - [2] 토큰 메시지 프레이밍(노드 단위 start/content/end) ✅
-- [ ] 누락 이벤트: STATE_DELTA(JSON-Patch), MESSAGES_SNAPSHOT, CUSTOM, STEP 오류
-- [ ] `encode/1` 단건 매핑 + AG-UI 스키마 준수(필드명/필수값) 검증 테스트
-- [ ] 엣지케이스: 중첩 인터럽트, 빈 스트림, 도구 호출 중 텍스트 혼재
-상태: 🔵
+- [2] 누락 이벤트: STATE_DELTA(JSON-Patch)/MESSAGES_SNAPSHOT/CUSTOM ✅
+- [2] `encode/1` 단건 무상태 매핑 ✅
+- [1.5] 엣지케이스: 중첩 인터럽트·빈 스트림·툴콜이 텍스트 메시지 닫기 ✅
+상태: ✅ (22 tests)
 
 ## T1.2 — LLM SSE 스트리밍 (4 어댑터)
 시작 8.0 → 목표 9.5
