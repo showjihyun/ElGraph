@@ -48,6 +48,28 @@ defmodule ElGraph.OTel.MappingTest do
                  error: {:api_error, 429, %{}}
                })
     end
+
+    test "invoke spans carry error.type when the run failed" do
+      assert {"invoke_workflow", %{"error.type" => msg}} =
+               Mapping.span([:el_graph, :invoke], %{
+                 thread_id: "t1",
+                 error: {:max_steps_exceeded, %{}}
+               })
+
+      assert msg =~ "max_steps_exceeded"
+    end
+
+    test "node spans carry error.type when the node raised" do
+      assert {"execute_tool boom", %{"error.type" => msg}} =
+               Mapping.span([:el_graph, :node], %{
+                 node: :boom,
+                 step: 1,
+                 thread_id: "t1",
+                 error: %RuntimeError{message: "kaboom"}
+               })
+
+      assert msg =~ "kaboom"
+    end
   end
 
   describe "실행기 telemetry 메타데이터와의 정합" do

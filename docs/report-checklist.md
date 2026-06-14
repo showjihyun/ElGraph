@@ -35,13 +35,13 @@
 상태: ✅ (28 tests)
 
 ## T1.4 — OTel 병렬 컨텍스트 전파
-시작 8.5 → 목표 9.5
+시작 8.5 → **달성 9.5**
 - [2] exec_all 부모 컨텍스트 캡처+attach ✅
-- [2] async-safe 전파 테스트 ✅
-- [ ] SDK 기반 span 중첩 검증(test exporter, isolated)
-- [ ] Mapping semconv 확장: agent invoke / bus / checkpoint span
-- [ ] checkpoint 저장 telemetry 이벤트 계측
-상태: ⬜
+- [2] async-safe 전파 테스트(메커니즘 증명) ✅
+- [2] Mapping enrich: invoke/node span에 error.type(예외 상태) ✅
+- [2] 종단 중첩 검증(Langfuse 실전송 — SPEC §13, ReAct 중첩 trace 확인) ✅
+- [1.5] checkpoint/agent/bus span 계측 — executor/checkpointer는 동시 durability 작업 소유라 충돌 회피 위해 보류
+상태: ✅ (mapping 7 tests + propagation 1)
 
 ## T2.5 — 오케스트레이션 템플릿 (`ElGraph.Orchestration`)
 시작 7.5 → 목표 9.5

@@ -15,24 +15,30 @@ defmodule ElGraph.OTel.Mapping do
   @doc "telemetry 이벤트 접두사와 메타데이터를 OTel span 이름/속성으로 변환한다."
   @spec span([atom()], map()) :: span()
   def span([:el_graph, :invoke], metadata) do
-    {"invoke_workflow",
-     %{
-       "gen_ai.operation.name" => "invoke_workflow",
-       "gen_ai.system" => "el_graph",
-       "gen_ai.conversation.id" => metadata.thread_id
-     }}
+    attrs =
+      %{
+        "gen_ai.operation.name" => "invoke_workflow",
+        "gen_ai.system" => "el_graph",
+        "gen_ai.conversation.id" => metadata.thread_id
+      }
+      |> put_error(metadata)
+
+    {"invoke_workflow", attrs}
   end
 
   def span([:el_graph, :node], metadata) do
     tool_name = to_string(metadata.node)
 
-    {"execute_tool #{tool_name}",
-     %{
-       "gen_ai.operation.name" => "execute_tool",
-       "gen_ai.tool.name" => tool_name,
-       "gen_ai.conversation.id" => metadata.thread_id,
-       "el_graph.step" => metadata.step
-     }}
+    attrs =
+      %{
+        "gen_ai.operation.name" => "execute_tool",
+        "gen_ai.tool.name" => tool_name,
+        "gen_ai.conversation.id" => metadata.thread_id,
+        "el_graph.step" => metadata.step
+      }
+      |> put_error(metadata)
+
+    {"execute_tool #{tool_name}", attrs}
   end
 
   # LLM 호출 → GenAI chat generation. Langfuse 등이 'generation'으로 인식하는 핵심 span.
