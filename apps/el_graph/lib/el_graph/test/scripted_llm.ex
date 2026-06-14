@@ -35,6 +35,45 @@ defmodule ElGraph.Test.ScriptedLLM do
     end)
   end
 
+  @doc """
+  `chat/3`의 스트리밍 변형. 스크립트 원소가 `{:deltas, parts, message}`면 각 part를
+  `on_delta`로 차례로 방출하고, 일반 assistant 메시지면 content 전체를 토큰 1개로 방출한다.
+  """
+  @impl ElGraph.LLM
+  def stream_chat(pid, messages, opts) do
+    on_delta = Keyword.get(opts, :on_delta, fn _ -> :ok end)
+
+    next =
+      Agent.get_and_update(pid, fn state ->
+        state = %{state | calls: [%{messages: messages, opts: opts} | state.calls]}
+
+        case state.script do
+          [] -> {{:error, :script_exhausted}, state}
+          [next | rest] -> {next, %{state | script: rest}}
+        end
+      end)
+
+    stream_result(next, on_delta)
+  end
+
+  defp stream_result({:error, _reason} = error, _on_delta), do: error
+
+  defp stream_result({:deltas, parts, message}, on_delta) do
+    Enum.each(parts, fn part -> on_delta.({:token, part}) end)
+    wrap(message)
+  end
+
+  defp stream_result(other, on_delta) do
+    {:ok, response} = result = wrap(other)
+    emit_content(response.message, on_delta)
+    result
+  end
+
+  defp emit_content(%{content: content}, on_delta) when is_binary(content),
+    do: on_delta.({:token, content})
+
+  defp emit_content(_message, _on_delta), do: :ok
+
   defp wrap({:error, _reason} = error), do: error
   defp wrap({:ok, _response} = ok), do: ok
 

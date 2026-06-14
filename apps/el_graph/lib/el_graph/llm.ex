@@ -26,6 +26,25 @@ defmodule ElGraph.LLM do
   @callback chat(config :: term(), messages :: [message()], opts :: keyword()) ::
               {:ok, response()} | {:error, term()}
 
+  @typedoc "스트리밍 델타 이벤트 — `on_delta` 콜백이 받는다."
+  @type delta :: {:token, binary()}
+
+  @doc """
+  `chat/3`의 스트리밍 변형. 토큰이 도착하는 대로 `opts[:on_delta]`(`delta()` 1-인자 fun)를
+  호출하고, 완료 시 `chat/3`과 동일한 누적 `response()`를 반환한다. 선택 콜백 — 모든
+  어댑터가 구현하지는 않는다(`stream_supported?/1`로 확인).
+  """
+  @callback stream_chat(config :: term(), messages :: [message()], opts :: keyword()) ::
+              {:ok, response()} | {:error, term()}
+
+  @optional_callbacks stream_chat: 3
+
+  @doc "어댑터(`{module, config}`)가 스트리밍(`stream_chat/3`)을 지원하는지 확인한다."
+  @spec stream_supported?({module(), term()}) :: boolean()
+  def stream_supported?({module, _config}) when is_atom(module) do
+    Code.ensure_loaded?(module) and function_exported?(module, :stream_chat, 3)
+  end
+
   @doc "usage 누적 reducer — `:usage` 채널에 쓴다 (비용 가드, SPEC §4)."
   @spec add_usage(usage(), usage() | nil) :: usage()
   def add_usage(current, nil), do: current

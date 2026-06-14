@@ -19,6 +19,22 @@ defmodule ElGraph.LLM.OpenAIIntegrationTest do
     assert usage.output_tokens > 0
   end
 
+  test "stream_chat streams token deltas and returns the assembled response" do
+    parent = self()
+
+    assert {:ok, %{message: %{role: :assistant, content: content}, usage: usage}} =
+             OpenAI.stream_chat(
+               config(),
+               [LLM.user("Count: one two three. Reply with exactly those three words.")],
+               on_delta: fn {:token, t} -> send(parent, {:token, t}) end
+             )
+
+    assert is_binary(content) and content != ""
+    assert usage.input_tokens > 0
+    # at least one streamed token delta arrived
+    assert_received {:token, _}
+  end
+
   test "the ReAct preset completes a real tool-call loop" do
     llm = {OpenAI, config()}
 
