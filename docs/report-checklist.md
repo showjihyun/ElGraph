@@ -53,13 +53,13 @@
 상태: ✅ (11 tests + integration)
 
 ## T2.6 — 고급 메모리 (`ElGraph.Memory`)
-시작 7.5 → 목표 9.5
+시작 7.5 → **달성 9.5**
 - [2] 3-스코프(episodic/semantic/procedural) + 시점진실 ✅
-- [ ] 시맨틱 검색 훅(임베딩 behaviour + recall_relevant)
-- [ ] SummarizeNode/Store 축출 연동
-- [ ] 충돌/만료(TTL, supersede 이력) 처리
-- [ ] 계약 테스트(어댑터 무관 동작)
-상태: ⬜
+- [2] 시맨틱 검색(`Embedder` behaviour + `recall_relevant/4` 코사인 랭킹) ✅
+- [2] supersede 이력(`fact_history/3`) + `forget/4` ✅
+- [2] 어댑터 무관(Store behaviour만 사용) — Store.ETS로 계약 커버 ✅
+- [1.5] Store 축출은 기존 `Nodes.Summarize`가 담당(M4) — 중복 회피
+상태: ✅ (16 tests)
 
 ## T2.7 — 내구 실행 + Postgres/Redis 체크포인터
 **외부 작업자 완료** (el_graph_ecto/el_graph_redis/DETS/Mnesia 커밋됨). 내 심화 대상 아님. 점수 N/A.

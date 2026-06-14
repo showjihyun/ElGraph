@@ -9,12 +9,20 @@ defmodule ElGraph.Memory do
     * semantic  — subject별 사실, 최신이 과거를 대체 (지금 참인 것)
     * procedural — 학습된 규칙/선호
 
-  `ElGraph.Store` 어댑터(KV) 위의 순수 계층이다 — Store behaviour만 사용하므로 ETS/DB 등
-  어느 어댑터로든 동작한다. namespace로 주체(사용자 등)를 분리한다.
+  `ElGraph.Store` 어댑터(KV) 위의 순수 계층이다 — **오직 `ElGraph.Store` behaviour만**
+  사용한다(`put/get/delete/list`). 따라서 ETS/Postgres 등 어느 Store 어댑터로든 동일하게
+  동작하며 어댑터별 가정이 새지 않는다. namespace로 주체(사용자 등)를 분리한다.
 
       mem = ElGraph.Memory.new({ElGraph.Store.ETS, config})
       ElGraph.Memory.set_fact(mem, ["users", "u1"], "plan", "pro")
       ElGraph.Memory.get_fact(mem, ["users", "u1"], "plan")  #=> {:ok, "pro"}
+
+  추가 기능:
+
+    * `recall_relevant/4` — 임베더(`ElGraph.Memory.Embedder`) 기반 시맨틱 회수
+      (코사인 유사도 랭킹).
+    * `fact_history/3` — 사실이 어떻게 대체되어 왔는지 감사(시점 진실 + 출처).
+    * `forget/4` — 사실/규칙 삭제.
   """
 
   @enforce_keys [:store]
@@ -48,10 +56,20 @@ defmodule ElGraph.Memory do
 
   ## semantic — subject별 최신 사실
 
-  @doc "사실을 기록한다 — 같은 subject의 과거 값을 대체한다(시점 진실)."
+  @doc """
+  사실을 기록한다 — 같은 subject의 과거 값을 대체한다(시점 진실).
+
+  대체되는 직전 값은 `fact_history/3`로 감사할 수 있도록 subject별 히스토리에 보관한다.
+  """
   @spec set_fact(t(), namespace(), String.t(), term(), keyword()) :: :ok
-  def set_fact(%__MODULE__{} = mem, ns, subject, value, opts \\ []) do
+  def set_fact(%__MODULE__{store: {mod, config}} = mem, ns, subject, value, opts \\ []) do
     at = Keyword.get_lazy(opts, :at, &mono/0)
+
+    case mod.get(config, scope(ns, "semantic"), subject) do
+      {:ok, prior} -> push_history(mem, ns, subject, prior)
+      :not_found -> :ok
+    end
+
     put(mem, scope(ns, "semantic"), subject, %{value: value, at: at})
   end
 
@@ -72,6 +90,19 @@ defmodule ElGraph.Memory do
     |> Map.new(fn {subject, %{value: value}} -> {subject, value} end)
   end
 
+  @doc """
+  subject의 대체된 과거 값들을 최신순으로 회수한다(시점 진실 + 출처 감사).
+
+  현재 참인 값은 포함하지 않는다 — 그건 `get_fact/3`로 얻는다.
+  """
+  @spec fact_history(t(), namespace(), String.t()) :: [%{value: term(), at: term()}]
+  def fact_history(%__MODULE__{store: {mod, config}}, ns, subject) do
+    case mod.get(config, scope(ns, "semantic-history"), subject) do
+      {:ok, history} when is_list(history) -> history
+      :not_found -> []
+    end
+  end
+
   ## procedural — 규칙
 
   @doc "규칙/선호를 학습한다."
@@ -87,7 +118,73 @@ defmodule ElGraph.Memory do
     |> Map.new(fn {name, %{value: rule}} -> {name, rule} end)
   end
 
+  ## 시맨틱 회수 + 망각
+
+  @doc """
+  쿼리와 의미적으로 가까운 기억을 코사인 유사도로 랭킹해 회수한다.
+
+  옵션:
+
+    * `:embedder` (필수) — `ElGraph.Memory.Embedder`를 구현한 모듈(atom) 또는 `{module, _}`.
+    * `:scope` — 검색할 스코프 (기본 `"episodic"`, `"semantic"` 등 허용).
+    * `:limit` — 상위 개수 (기본 5).
+
+  쿼리와 각 엔트리 값(binary 문자열인 것만)을 임베딩해 유사도 내림차순으로 정렬하고
+  상위 `limit`개의 **값**을 돌려준다. binary가 아닌 값은 건너뛴다.
+  """
+  @spec recall_relevant(t(), namespace(), String.t(), keyword()) :: [term()]
+  def recall_relevant(%__MODULE__{} = mem, ns, query, opts) do
+    embedder = embedder_module(Keyword.fetch!(opts, :embedder))
+    scope = Keyword.get(opts, :scope, "episodic")
+    limit = Keyword.get(opts, :limit, 5)
+
+    query_vec = embedder.embed(query)
+
+    mem
+    |> list(scope(ns, scope))
+    |> Enum.filter(&is_binary(&1.value))
+    |> Enum.map(&{cosine(query_vec, embedder.embed(&1.value)), &1.value})
+    |> Enum.sort_by(fn {score, _value} -> score end, :desc)
+    |> Enum.take(limit)
+    |> Enum.map(fn {_score, value} -> value end)
+  end
+
+  @doc """
+  키로 사실(`:semantic`)/규칙(`:procedural`)을 삭제한다.
+
+  episodic은 키가 시간 정렬용 내부 키라 키 기반 삭제 대상이 아니다(미지원).
+  """
+  @spec forget(t(), namespace(), :semantic | :episodic | :procedural, String.t()) :: :ok
+  def forget(%__MODULE__{store: {mod, config}}, ns, :semantic, key) do
+    mod.delete(config, scope(ns, "semantic-history"), key)
+    mod.delete(config, scope(ns, "semantic"), key)
+  end
+
+  def forget(%__MODULE__{store: {mod, config}}, ns, :procedural, key) do
+    mod.delete(config, scope(ns, "procedural"), key)
+  end
+
   ## 내부
+
+  defp embedder_module({mod, _}) when is_atom(mod), do: mod
+  defp embedder_module(mod) when is_atom(mod), do: mod
+
+  defp push_history(%__MODULE__{} = mem, ns, subject, prior) do
+    history = fact_history(mem, ns, subject)
+    put(mem, scope(ns, "semantic-history"), subject, [prior | history])
+  end
+
+  # 코사인 유사도. 0 노름이면 0.0 (divide-by-zero 가드).
+  defp cosine(a, b) do
+    dot = a |> Enum.zip(b) |> Enum.reduce(0.0, fn {x, y}, acc -> acc + x * y end)
+    norm = :math.sqrt(Enum.reduce(a, 0.0, &(&1 * &1 + &2)))
+    norm_b = :math.sqrt(Enum.reduce(b, 0.0, &(&1 * &1 + &2)))
+
+    case norm * norm_b do
+      +0.0 -> 0.0
+      denom -> dot / denom
+    end
+  end
 
   defp put(%__MODULE__{store: {mod, config}}, ns, key, value), do: mod.put(config, ns, key, value)
 
