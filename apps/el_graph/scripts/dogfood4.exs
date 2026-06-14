@@ -1,4 +1,4 @@
-# 도그푸딩 세션 4: Signal Bus로 발견 8 해소 (실 OpenAI)
+# 도그푸딩 세션 5: Signal Bus로 발견 8 해소 (실 OpenAI)
 #   mix run scripts/dogfood4.exs
 #
 # 세션 3에서 센서→에이전트를 인라인 클로저로 손수 이었다. 이제 버스로 푼다:

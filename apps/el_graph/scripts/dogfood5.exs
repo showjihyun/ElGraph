@@ -1,4 +1,4 @@
-# 도그푸딩 세션 5: Store 장기기억 + 요약 압축 (실 OpenAI)
+# 도그푸딩 세션 6: Store 장기기억 + 요약 압축 (실 OpenAI)
 #   mix run scripts/dogfood5.exs
 #
 # 긴 대화를 만들고 Summarize 노드로 압축 → 축출분이 Store에 보관되는지 관찰.

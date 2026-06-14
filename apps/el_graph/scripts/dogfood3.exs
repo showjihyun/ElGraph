@@ -1,4 +1,4 @@
-# 도그푸딩 세션 3: Sensor → Agent 체인 (실 OpenAI)
+# 도그푸딩 세션 4: Sensor → Agent 체인 (실 OpenAI)
 #   mix run scripts/dogfood3.exs
 #
 # DocsWatch 센서가 docs/ 변경을 감지 → "docs.changed" 시그널 →

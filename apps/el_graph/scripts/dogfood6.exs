@@ -1,4 +1,4 @@
-# 도그푸딩 세션 6: 멀티 에이전트 파이프라인 (핸드오프, 실 OpenAI)
+# 도그푸딩 세션 7: 멀티 에이전트 파이프라인 (핸드오프, 실 OpenAI)
 #   mix run scripts/dogfood6.exs
 #
 # Researcher(문서 검색) --research.done--> Bus --> Summarizer(요약) --> 사용자

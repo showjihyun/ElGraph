@@ -5,7 +5,7 @@
 
 상태: v0.9 (설계 검토 R1~R5 반영, M1~M4 완료 · M5 코어 완료) · 2026-06-13
 
-**구현 현황 요약**: 테스트 202개 + 통합 3개(실 OpenAI), 전부 `async: true`. 코어(L1) 런타임
+**구현 현황 요약**: 테스트 240개(el_graph 213 + el_trace 27) + 통합 3개(실 OpenAI), 전부 `async: true`. 코어(L1) 런타임
 의존성 `:telemetry` 1개. 실 OpenAI로 도는 문서 Q&A 에이전트, 센서→버스→에이전트 체인,
 2-에이전트 파이프라인이 동작 검증됨. 구현 로드맵·완료 기준은 §8, 실사용 관찰은 `DOGFOODING.md`.
 
@@ -281,7 +281,7 @@ end
 - **R3 (생태계/제품)**: 패키지명 가용 확인(§11), 경쟁 구도 조사 및 차별점 명문화(§1), brainlid/langchain 재사용 검토 항목화(§11), 품질 게이트 신설(§10)
 - **R4 (LangGraph 약점 대응, 2026-06-12)**: 알려진 약점 7개를 조사·분류하고 부록 A 대응표 신설. 신규 반영 — 실행 introspection(§3.4, M3), 체크포인트 보존 정책(§3.5, M2), 토큰/비용 예산 가드(§4, M2), 원칙 2개 추가(§1: 제어 흐름 위임, 오픈 코어)
 - **R5 (2026 트렌드 반영, 2026-06-12)**: 에이전트 프레임워크 트렌드 조사(A2A 150+ 조직 채택, OTel GenAI 규약 플랫폼 채택, 멀티 에이전트 패턴 1급화, 컨텍스트 압축 표준화). 신규 반영 — A2A 어댑터+상태 매핑표(§6, M5), OTel GenAI 매핑 방침(§3.7, M3), 오케스트레이션 패턴 템플릿(§6, M5), 컨텍스트 압축 2층 설계(trim §3.1 M2 / 요약 §4 M4), Evals·자유 대화 런타임 비목표 명시(§9). 내구 실행·HITL·MCP 방향은 트렌드 일치 확인 — 변경 없음
-- **R6 (구현 단계 종합, 2026-06-13)**: M1~M5 코어를 TDD로 구현하며 설계와 달라진 결정 확정 (아래 §13 구현 노트). 주요 변경 — Skill이 추상 컴포지션이 아니라 `SignalReAct`(시그널 구동 ReAct, 4-파라미터)로 도그푸딩에서 추출; LLM 어댑터는 in-repo(hex 분리 보류, SSE 미구현); SignalTransport는 Bus(`:local`/`:pg`)로 구체화; 핸드오프는 `:command, :handoff`가 아니라 Skill `:emit` + 버스로 단순화; A2A·OTel은 순수 매핑 계층만(HTTP/SDK 브리지는 별도 패키지). 도그푸딩 6세션의 마찰 13건 중 11건 해소(§DOGFOODING.md).
+- **R6 (구현 단계 종합, 2026-06-13)**: M1~M5 코어를 TDD로 구현하며 설계와 달라진 결정 확정 (아래 §13 구현 노트). 주요 변경 — Skill이 추상 컴포지션이 아니라 `SignalReAct`(시그널 구동 ReAct, 4-파라미터)로 도그푸딩에서 추출; LLM 어댑터는 in-repo(hex 분리 보류, SSE 미구현); SignalTransport는 Bus(`:local`/`:pg`)로 구체화; 핸드오프는 `:command, :handoff`가 아니라 Skill `:emit` + 버스로 단순화; A2A·OTel은 순수 매핑 계층만(HTTP/SDK 브리지는 별도 패키지). 도그푸딩 7세션의 마찰 13건 중 11건 해소(§DOGFOODING.md).
 
 ## 13. 구현 노트 (설계 → 실제)
 
@@ -297,6 +297,7 @@ SPEC 본문은 설계 시점 표기를 유지한다. 실제 구현이 본문과 
 | §3.7 OTel 어댑터 | `ElGraph.OTel.Mapping` 순수 함수 | OTel SDK는 전역 상태라 async 테스트와 충돌 → 매핑만 in-repo, SDK 브리지는 `el_graph_otel` 몫 |
 | §6 오케스트레이션 템플릿(supervisor/magentic) | 미구현 — 핸드오프/fan-out은 버스로 충분히 표현됨 | 템플릿은 표본이 더 쌓이면. 현재 버스+emit으로 파이프라인 동작 |
 | §3.6 동적 인터럽트 throw | 노드 래퍼(Task 내부)에서 catch → 태그 반환 | R1 설계대로 구현. timeout 노드 안에서도 동작 검증 |
+| §3.6 인터럽트 반환 `{:interrupted, ref, state}` | `{:interrupted, map()}` (ref 없는 2-튜플, `node`·`payload`·`next` 포함 맵) | resume이 ref 대신 thread_id로 매칭 → ref 불필요. §6 A2A 표·README도 2-튜플 기준 |
 
 **추가 구현(설계에 없던 것)**: `Nodes.Summarize`의 append `{:replace}` 마커(LangGraph RemoveMessage 패턴), Agent `:thread` 정책(`:per_request`/`{:fixed,id}` — 도그푸딩 마찰 7), Skill reply의 usage 포함(마찰 3).
 
@@ -306,7 +307,7 @@ SPEC 본문은 설계 시점 표기를 유지한다. 실제 구현이 본문과 
 
 **OTel 브리지 + Langfuse (2026-06-14)**: `ElGraph.OTel.Bridge` — telemetry span을 OpenTelemetry span으로 변환(`opentelemetry_telemetry`로 부모-자식 컨텍스트 관리, 속성은 `OTel.Mapping`의 GenAI semconv). `langfuse_otlp_config/3`이 Langfuse OTLP/HTTP exporter 설정(Basic auth + `x-langfuse-ingestion-version`)을 생성. **방침 확정**: Langfuse를 재구현하지 않고 OTLP 표준으로 연동 — 같은 OTel span이 Langfuse/Datadog/Jaeger 등 어느 백엔드로든 흐른다. **OTel 의존성**(opentelemetry/exporter/telemetry)을 in-repo 추가(Windows 컴파일 확인), 향후 `el_graph_otel`로 분리 — 코어 "telemetry 1개" 원칙은 그때 복원. 한계: 병렬 노드(별도 Task)는 OTel 컨텍스트 자동 전파 안 됨(1차). **실전송 검증 완료(2026-06-14)**: Langfuse self-host(docker-compose + headless init)로 `scripts/otel_langfuse.exs` 실행 → trace 1개 + observation 6개 도착. Langfuse가 `chat gpt-4o`를 GENERATION(model·토큰 정확), 노드를 TOOL, invoke를 SPAN으로 정확히 분류 — GenAI semconv 매핑이 실데이터로 검증됨. ReAct 루프(agent→tools→agent)가 중첩 trace로 표시.
 
-**ElTrace 프로토타입 착수 (2026-06-14)**: Langfuse 관찰(도그푸딩 세션 7) 결과 "ElGraph가 체크포인트·버스로 아는 인과를 Langfuse는 모른다"는 4개 차별점을 데이터로 확정 — #1 인터럽트 가시성, #2 thread 생애(invoke→interrupt→resume), #3 멀티 에이전트 핸드오프, #4 time-travel 재개. 우선순위 #1·#2를 구현: `ElTrace.Timeline`(체크포인트 체인 → 생애 타임라인 + 텍스트 렌더). 선결로 `Checkpoint.interrupt_info`(node+payload)를 추가 — 동적 인터럽트가 기록하고 재개 후에도 보존(Langfuse가 못 보여준 "왜 멈췄나"의 데이터 소스). 시연: `scripts/eltrace_demo.exs`. **방침**: ElTrace는 범용 trace(span/토큰)를 재구현하지 않고 Langfuse에 위임 — 체크포인트가 아는 인과만 다룬다. **구조**: `lib/el_trace/`에 두되 ElGraph 의존은 Checkpointer behaviour뿐 — 별도 앱(`el_trace`) 분리에 유리.
+**ElTrace 프로토타입 착수 (2026-06-14)**: Langfuse 관찰(도그푸딩 세션 8) 결과 "ElGraph가 체크포인트·버스로 아는 인과를 Langfuse는 모른다"는 4개 차별점을 데이터로 확정 — #1 인터럽트 가시성, #2 thread 생애(invoke→interrupt→resume), #3 멀티 에이전트 핸드오프, #4 time-travel 재개. 우선순위 #1·#2를 구현: `ElTrace.Timeline`(체크포인트 체인 → 생애 타임라인 + 텍스트 렌더). 선결로 `Checkpoint.interrupt_info`(node+payload)를 추가 — 동적 인터럽트가 기록하고 재개 후에도 보존(Langfuse가 못 보여준 "왜 멈췄나"의 데이터 소스). 시연: `scripts/eltrace_demo.exs`. **방침**: ElTrace는 범용 trace(span/토큰)를 재구현하지 않고 Langfuse에 위임 — 체크포인트가 아는 인과만 다룬다. **구조**: `lib/el_trace/`에 두되 ElGraph 의존은 Checkpointer behaviour뿐 — 별도 앱(`el_trace`) 분리에 유리.
 
 **#4 time-travel 재개 추가**: `ElTrace.Replay.from/5` + `Executor.resume_from/3` — 임의 과거 step의 체크포인트 상태로 새 thread를 분기(fork)해 재실행, 원래 thread 보존. "if 시나리오"(승인↔거절) 탐색이 안전하게 가능 — Langfuse가 trace를 보여주기만 하는 것과 대비되는 ElGraph만의 기능. 시연으로 검증(승인 완료 thread 보존 + step 1로 되감아 거절 분기). **#1·#2·#4의 데이터/제어 계층이 전부 Phoenix 없이 동작** — LiveView는 이 위의 순수 표현 작업(Timeline 시각화 + 인터럽트 승인/Replay 버튼). 잔여: LiveView 실시간 UI(Phoenix 의존, `el_trace` 앱 분리 권장), #3 핸드오프 그래프(버스 시그널 인과). **자체 관측 도구(ElTrace) 방침**: 풀 Langfuse 클론은 비목표. ElGraph 차별점(체크포인트 time-travel·LiveView 실시간·BEAM 내장)만 OTel 위에 쌓는다 — Langfuse로 한동안 도그푸딩 후 추출.
 

@@ -3,7 +3,7 @@
 데모 에이전트(`ElGraph.Demo`, 문서 Q&A, 실 OpenAI gpt-4o)를 실제로 굴리며 관찰한 기록.
 SPEC §5 원칙: "Skill은 실제 에이전트를 도그푸딩한 후 반복 패턴을 추출해 설계한다 — 미리 추상화하지 않는다."
 
-실행 방법: `mix run scripts/dogfood.exs` (유형별 질문 4종) / `mix run scripts/demo.exs` (대화형)
+실행 방법(`apps/el_graph`에서 실행 — 스크립트는 `apps/el_graph/scripts/`에 있다): `mix run scripts/dogfood.exs` (유형별 질문 4종) / `mix run scripts/demo.exs` (대화형)
 
 ## 세션 1 (2026-06-13) — 발견과 수정
 
@@ -189,7 +189,30 @@ Agent에 `:subscribe` 옵션 통합(init에서 자기 구독).
 11. **함수 구독이 발행자 컨텍스트에서 실행됨** — 무거운 변환이면 발행자를 블록. 현재는
     가벼운 변환만 상정. 비동기 dispatch는 필요해지면(표본 나오면) 추가. 지금은 YAGNI.
 
-## 세션 6 (2026-06-13) — 멀티 에이전트 (M5: 핸드오프 / :pg / A2A)
+## 세션 6 (2026-06-13) — Store 장기기억 + 요약 압축 (M4)
+
+`ElGraph.Nodes.Summarize`(컨텍스트 압축)와 `ElGraph.Store`(thread를 넘는 장기 기억)를
+실 OpenAI로 연결해 관찰. 긴 대화를 만들고 임계 초과 시 오래된 메시지를 LLM 요약으로
+치환하면서, 축출된 원문이 Store에 보관되는지 확인하는 것이 목적.
+
+### 구현 / 시연 (`scripts/dogfood5.exs`, 실 OpenAI)
+
+- 14턴 대화를 시뮬레이션하고 `Summarize.run`에 `trigger: {:messages, 10}`,
+  `keep: {:messages, 6}`, `store: {Store, config, namespace}` 옵션 전달.
+- 압축 결과는 append `{:replace}` 마커로 반환: `[요약 1] + [최근 6]` = 7개 메시지로 수렴
+  (오래된 8개는 LLM 요약 1건으로 치환).
+- 축출된 8개 원문은 Store 네임스페이스(`["conversations", "demo"]`)에 보관 — `Store.list/2`로
+  확인. SPEC §4(요약 노드)·§6(Store) 설계가 실데이터로 검증됨(SPEC M4 "요약+Store 모두 실
+  OpenAI 검증"의 근거).
+
+### 관찰
+
+- **요약은 압축이자 인덱싱** — 단기 컨텍스트는 요약본으로 가볍게 유지하되, 원문은
+  Store에 남아 thread를 넘어 다시 조회 가능. 체크포인트(단기)와 Store(장기)의 역할 분리가
+  동작으로 확인됨. trigger 미달이면 압축하지 않고 원본 그대로 통과(불필요한 LLM 호출 회피).
+  (새 마찰 없음 — 마찰 카운터 13건 유지.)
+
+## 세션 7 (2026-06-13) — 멀티 에이전트 (M5: 핸드오프 / :pg / A2A)
 
 M5 코어 3종을 TDD로 구현하고 멀티 에이전트 파이프라인을 실 OpenAI로 관찰.
 
@@ -219,7 +242,7 @@ M5 코어 3종을 TDD로 구현하고 멀티 에이전트 파이프라인을 실
     1:1이라 순수 함수로 충분했고, HTTP 서버는 별도 패키지로 미룸. "BEAM이라 분산이 공짜"는
     아니지만(SPEC R2), 핸드오프·fan-out·라우팅은 버스로 거의 공짜였다.
 
-## 세션 7 (2026-06-14) — Langfuse 관찰 → ElTrace 차별점 도출
+## 세션 8 (2026-06-14) — Langfuse 관찰 → ElTrace 차별점 도출
 
 OTel 브리지로 다양한 실행 패턴을 self-host Langfuse에 보내고(`scripts/otel_observe.exs`),
 API로 trace를 조회해 "Langfuse가 잘 보여주는 것 / 못 보여주는 것"을 데이터로 관찰했다.

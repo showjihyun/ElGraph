@@ -79,16 +79,4 @@ Note: `mix` is not on PATH in pre-existing shells — prepend `$env:USERPROFILE\
 
 Note (umbrella): `mix test` from the repo root runs both apps. To run a single test file, `cd apps/<app>` first (`mix cmd --cd` fails to spawn `mix.bat` on Windows). Each app's tests run with the **app dir** as CWD — code that reads repo-root files (e.g. `docs/`) must resolve paths independent of CWD.
 
-## Agent skills
-
-### Issue tracker
-
-GitHub Issues at showjihyun/Mousike, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Canonical names (`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`). See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context layout (`CONTEXT.md` + `docs/adr/` at the repo root). See `docs/agents/domain.md`.
+Note (scripts): the `mix run scripts/*.exs` demo/dogfood scripts live under `apps/el_graph/scripts/` — run them from `apps/el_graph` (not the repo root).
