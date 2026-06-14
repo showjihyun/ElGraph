@@ -58,4 +58,60 @@ defmodule ElGraph.A2ATest do
       assert %{question: "hi"} = A2A.message_to_input(message)
     end
   end
+
+  describe "task_from_checkpoint/2 — durable run ↔ A2A Task (체크포인터 연동)" do
+    alias ElGraph.Checkpointer.ETS
+
+    defp ask_graph do
+      ElGraph.new()
+      |> ElGraph.state(:result)
+      |> ElGraph.add_node(:ask, &ElGraph.TestNodes.ask/2)
+      |> ElGraph.compile(entry: :ask)
+    end
+
+    setup do
+      pid = start_supervised!(ETS)
+      %{cp: {ETS, ETS.config(pid)}}
+    end
+
+    test "an interrupted run maps to INPUT_REQUIRED with the interrupt payload", %{cp: cp} do
+      {:interrupted, _} = ElGraph.invoke(ask_graph(), %{}, checkpointer: cp, thread_id: "t1")
+
+      assert %{id: "t1", status: %{state: "input-required", payload: %{question: "name?"}}} =
+               A2A.task_from_checkpoint(cp, "t1")
+    end
+
+    test "a completed run maps to COMPLETED with the final state", %{cp: cp} do
+      {:interrupted, _} = ElGraph.invoke(ask_graph(), %{}, checkpointer: cp, thread_id: "t2")
+      {:ok, _} = ElGraph.resume(ask_graph(), checkpointer: cp, thread_id: "t2", resume: "Alice")
+
+      assert %{id: "t2", status: %{state: "completed", result: %{result: "Alice"}}} =
+               A2A.task_from_checkpoint(cp, "t2")
+    end
+
+    test "an in-progress checkpoint maps to WORKING", %{cp: {mod, config}} do
+      :ok =
+        mod.put(config, %ElGraph.Checkpoint{thread_id: "w", step: 1, state: %{}, next: [:more]})
+
+      assert %{id: "w", status: %{state: "working"}} =
+               A2A.task_from_checkpoint({mod, config}, "w")
+    end
+
+    test "an unknown thread maps to SUBMITTED", %{cp: cp} do
+      assert %{id: "ghost", status: %{state: "submitted"}} = A2A.task_from_checkpoint(cp, "ghost")
+    end
+
+    test "works across any durable backend (contract-level)", %{cp: cp} do
+      # DETS(무인프라 내구) 백엔드로도 동일하게 동작 — 어댑터 무관.
+      path = Path.join(System.tmp_dir!(), "a2a_dets_#{System.unique_integer([:positive])}.dets")
+      dets_pid = start_supervised!({ElGraph.Checkpointer.Dets, path: path}, id: :a2a_dets)
+      on_exit(fn -> File.rm(path) end)
+      dets_cp = {ElGraph.Checkpointer.Dets, ElGraph.Checkpointer.Dets.config(dets_pid)}
+
+      {:interrupted, _} = ElGraph.invoke(ask_graph(), %{}, checkpointer: dets_cp, thread_id: "d1")
+      assert %{status: %{state: "input-required"}} = A2A.task_from_checkpoint(dets_cp, "d1")
+
+      _ = cp
+    end
+  end
 end

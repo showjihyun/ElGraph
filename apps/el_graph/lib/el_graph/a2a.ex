@@ -13,6 +13,8 @@ defmodule ElGraph.A2A do
     실행 중             → WORKING
   """
 
+  alias ElGraph.Checkpoint
+
   @doc "ElGraph 실행 결과를 A2A Task 상태(맵)로 변환한다."
   @spec to_task_state(tuple()) :: map()
   def to_task_state({:ok, state}), do: %{state: "completed", result: state}
@@ -20,6 +22,35 @@ defmodule ElGraph.A2A do
 
   def to_task_state({:interrupted, %{payload: payload}}),
     do: %{state: "input-required", payload: payload}
+
+  @doc """
+  체크포인터에 영속된 durable run을 A2A Task로 변환한다 (thread_id로 조회).
+
+  최신 체크포인트에서 상태를 도출한다 — 어떤 체크포인터 백엔드(ETS/DETS/Mnesia/Postgres/Redis)든
+  무관하다(behaviour만 사용). A2A Task 생명주기 ↔ 체크포인트:
+
+    * `next == []`          → COMPLETED (결과 = 최종 state)
+    * 동적 인터럽트 대기      → INPUT_REQUIRED (payload 포함 — resume이 입력 제공)
+    * 진행 중(미완·미인터럽트) → WORKING
+    * 미존재                 → SUBMITTED
+
+  `to_task_state/1`을 재사용해 결과/페이로드 표현을 일관되게 유지한다. 정적 `interrupt_before`는
+  체크포인트에 인터럽트 표식을 남기지 않으므로 WORKING으로 보인다(동적 인터럽트가 HITL의 기본 경로).
+  """
+  @spec task_from_checkpoint({module(), term()}, String.t()) :: map()
+  def task_from_checkpoint({mod, config}, thread_id) do
+    %{id: thread_id, status: checkpoint_status(mod.get(config, thread_id, :latest))}
+  end
+
+  defp checkpoint_status({:ok, %Checkpoint{next: []} = checkpoint}),
+    do: to_task_state({:ok, checkpoint.state})
+
+  defp checkpoint_status({:ok, %Checkpoint{interrupted: node, interrupt_info: info}})
+       when not is_nil(node),
+       do: to_task_state({:interrupted, %{node: node, payload: info && info.payload}})
+
+  defp checkpoint_status({:ok, %Checkpoint{}}), do: %{state: "working"}
+  defp checkpoint_status(:not_found), do: %{state: "submitted"}
 
   @doc """
   에이전트 설정을 A2A Agent Card(JSON 직렬화 가능 맵)로 변환한다.
