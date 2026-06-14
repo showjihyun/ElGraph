@@ -103,6 +103,8 @@ defmodule ElGraph do
     * `:event_sink` — `ElGraph.Ctx.emit/2` 이벤트를 받을 pid
     * `:checkpointer` — `{module, config}`. 지정 시 초기 상태와 매 superstep 후 체크포인트 저장
     * `:interrupt_before` — 노드 목록. 해당 노드 진입 전에 `{:interrupted, info}` 반환 (`:checkpointer` 필수)
+    * `:durability` — 체크포인트 영속 시점 (SPEC §3.5). `:sync`(기본, 매 step 동기) /
+      `:async`(순서 보장 writer에 비동기, 반환 전 flush) / `:exit`(완료·인터럽트만 영속, 가장 빠름)
   """
   @spec invoke(Graph.t(), map() | keyword(), keyword()) ::
           {:ok, map()} | {:error, term()} | {:interrupted, map()}
