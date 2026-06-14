@@ -12,7 +12,17 @@ defmodule ElGraph.MixProject do
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      dialyzer: dialyzer()
+    ]
+  end
+
+  # Dialyzer 정적 타입 분석 (SPEC §10 품질 게이트). PLT는 _build에 캐시.
+  # 외부 의존성/사전 존재 경고는 `.dialyzer_ignore.exs`로 격리한다.
+  defp dialyzer do
+    [
+      ignore_warnings: ".dialyzer_ignore.exs",
+      flags: [:error_handling, :extra_return, :missing_return]
     ]
   end
 
@@ -36,7 +46,8 @@ defmodule ElGraph.MixProject do
       {:opentelemetry, "~> 1.5"},
       {:opentelemetry_exporter, "~> 1.8"},
       {:opentelemetry_telemetry, "~> 1.1"},
-      {:plug, "~> 1.16", only: :test}
+      {:plug, "~> 1.16", only: :test},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
   end
 end

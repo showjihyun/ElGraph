@@ -11,14 +11,20 @@ defmodule ElGraph.Graph do
             routers: %{},
             entry: nil
 
-  @typedoc "노드 구현: MFA 또는 2-인자 함수 `(state, ctx)`"
-  @type node_run :: {module(), atom(), [term()]} | (map(), ElGraph.Ctx.t() -> term())
+  @typedoc "MFA + 인자 리스트 `{module, fun, extra_args}` (`mfa()`의 arity가 아니라 인자 리스트)"
+  @type mfargs :: {module(), atom(), [term()]}
+
+  @typedoc "노드 구현: MFA(+인자) 또는 2-인자 함수 `(state, ctx)`"
+  @type node_run :: mfargs() | (map(), ElGraph.Ctx.t() -> term())
+
+  @typedoc "조건부 엣지 라우터: MFA(+인자) 또는 1-인자 함수 `(state) -> 노드 | :end`"
+  @type router :: mfargs() | (map() -> atom())
 
   @type t :: %__MODULE__{
-          state_def: %{atom() => %{default: term(), reducer: mfa() | function() | nil}},
+          state_def: %{atom() => %{default: term(), reducer: mfargs() | function() | nil}},
           nodes: %{atom() => %{run: node_run(), opts: keyword()}},
           edges: %{atom() => [atom()]},
-          routers: %{atom() => mfa() | (map() -> atom())},
+          routers: %{atom() => router()},
           entry: atom() | nil
         }
 end

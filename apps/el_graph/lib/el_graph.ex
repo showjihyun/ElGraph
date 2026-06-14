@@ -66,7 +66,7 @@ defmodule ElGraph do
 
   라우터는 순수해야 한다(SPEC §3.3) — 재개·리플레이 시 재평가된다.
   """
-  @spec add_conditional_edge(Graph.t(), atom(), mfa() | (map() -> atom())) :: Graph.t()
+  @spec add_conditional_edge(Graph.t(), atom(), Graph.router()) :: Graph.t()
   def add_conditional_edge(%Graph{} = graph, from, router) when is_atom(from) do
     %{graph | routers: Map.put(graph.routers, from, router)}
   end
@@ -317,7 +317,7 @@ defmodule ElGraph do
     reachable = reachable_from(graph, entry)
 
     unreachable =
-      graph.nodes |> Map.keys() |> Enum.reject(&MapSet.member?(reachable, &1)) |> Enum.sort()
+      graph.nodes |> Map.keys() |> Enum.reject(&Map.has_key?(reachable, &1)) |> Enum.sort()
 
     unless unreachable == [] do
       # :send/:command 의 동적 대상은 정적으로 알 수 없으므로 에러가 아닌 경고다.
@@ -332,15 +332,19 @@ defmodule ElGraph do
 
   defp validate_reachability!(%Graph{}, _entry), do: :ok
 
-  defp reachable_from(%Graph{edges: edges}, entry), do: do_reach(edges, [entry], MapSet.new())
+  # 방문 집합은 plain map(키=노드)로 둔다 — MapSet opaque 타입은 Dialyzer 경계 추적이 끊겨
+  # false-positive opaque 경고를 내므로 동등한 map-as-set을 쓴다.
+  @spec reachable_from(Graph.t(), atom()) :: %{atom() => true}
+  defp reachable_from(%Graph{edges: edges}, entry), do: do_reach(edges, [entry], %{})
 
+  @spec do_reach(%{atom() => [atom()]}, [atom()], %{atom() => true}) :: %{atom() => true}
   defp do_reach(_edges, [], visited), do: visited
 
   defp do_reach(edges, [node | rest], visited) do
-    if MapSet.member?(visited, node) or node == :end do
+    if Map.has_key?(visited, node) or node == :end do
       do_reach(edges, rest, visited)
     else
-      do_reach(edges, Map.get(edges, node, []) ++ rest, MapSet.put(visited, node))
+      do_reach(edges, Map.get(edges, node, []) ++ rest, Map.put(visited, node, true))
     end
   end
 end
