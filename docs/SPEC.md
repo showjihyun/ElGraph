@@ -131,14 +131,17 @@ end
 
 정책 옵션:
 
-- 빈도: `checkpoint: :every_step | :interrupts_only | :none` — 스텝이 잦은 그래프의 쓰기 증폭 대응.
-- 보존: `keep: :all | {:last, n}` — 매 스텝 전체 상태 스냅샷은 긴 thread에서 저장소를 비대화시킨다(LangGraph의 알려진 운영 부담, 부록 A-6). `{:last, n}`이면 어댑터가 오래된 체크포인트를 정리한다. M2.
-- durability: `checkpoint_mode: :sync | :async` — sync는 매 스텝 지연 직렬 추가, async는 크래시 시 마지막 스텝 유실 가능. 둘 다 정당한 트레이드오프이므로 옵션. async 모드의 쓰기는 러너가 스텝 순서대로 직렬 처리(순서 역전 금지)하며, 러너 정상 종료 시 잔여 쓰기를 flush한다.
+- 보존: `keep: :all | {:last, n}` — 매 스텝 전체 상태 스냅샷은 긴 thread에서 저장소를 비대화시킨다(LangGraph의 알려진 운영 부담, 부록 A-6). `{:last, n}`이면 어댑터가 오래된 체크포인트(와 해당 step의 pending writes)를 정리한다. **전 백엔드(ETS·DETS·Mnesia·Postgres·Redis) 구현 완료.**
+- durability(영속 *시점*): `durability: :sync | :async | :exit` (invoke/resume 옵션, **구현됨**). 잦은 체크포인트의 쓰기 증폭은 이 옵션으로 대응한다(별도 빈도 옵션은 미도입).
+  - `:sync`(기본) — 매 step 동기 영속. 강한 보장, 기존 동작과 동일.
+  - `:async` — 실행당 순서보장 writer 프로세스에 적재(FIFO 메일박스, 반환 전 flush). 크래시 시 마지막 step 유실 가능. writer는 실행기에 link되어 스텝 순서를 보존한다.
+  - `:exit` — 매 step 저장을 건너뛰고 **완료(finalize)·인터럽트만 강제 영속**(가장 빠름, 중간 크래시 복구 불가 — 빈도 옵션의 "interrupts_only" 의도를 대체).
+  - 인터럽트(정적/동적)는 모드와 무관하게 항상 동기 영속한다. `:async`는 인터럽트 기록 전에 writer를 flush해 같은 step의 비인터럽트 쓰기에 덮이지 않게 한다.
 
 기본 구현 `ElGraph.Checkpointer.ETS`:
 
 - **인스턴스별 테이블** (named table 싱글턴 금지) — 사용자의 `async: true` 테스트가 충돌하지 않는다. 테이블 소유 프로세스의 `child_spec` 제공, config로 테이블 참조 전달.
-- DB 어댑터(Postgres/SQLite)는 별도 패키지. 체크포인터 호출은 실행기 Task에서 직접 수행(커넥션 풀 사용) — 단일 GenServer로 직렬화하지 않는다.
+- 내구 백엔드(**구현 완료**): BEAM 내장 `Checkpointer.DETS`·`.Mnesia`(코어, 외부 인프라 0)와 별도 앱 `el_graph_ecto`(Postgres)·`el_graph_redis`(Valkey/Redis). DB 어댑터의 체크포인터 호출은 실행기 Task에서 직접 수행(커넥션 풀) — 단일 GenServer로 직렬화하지 않는다. 직렬화는 `:erlang.term_to_binary/1`(bytea/RESP).
 
 ### 3.6 인터럽트 / Human-in-the-loop
 
