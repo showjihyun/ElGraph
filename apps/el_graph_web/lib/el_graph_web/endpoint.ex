@@ -7,12 +7,18 @@ defmodule ElGraphWeb.Endpoint do
   @behaviour Plug
 
   @impl true
-  def init(opts), do: %{agents: Map.new(Keyword.get(opts, :agents, %{}))}
+  def init(opts) do
+    %{
+      agents: Map.new(Keyword.get(opts, :agents, %{})),
+      task_store: Keyword.get(opts, :task_store)
+    }
+  end
 
   @impl true
-  def call(conn, %{agents: agents}) do
+  def call(conn, %{agents: agents, task_store: task_store}) do
     conn
     |> Plug.Conn.assign(:agents, agents)
+    |> Plug.Conn.assign(:task_store, task_store)
     |> ElGraphWeb.Router.call(ElGraphWeb.Router.init([]))
   end
 end

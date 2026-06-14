@@ -26,13 +26,13 @@
 상태: ✅ (13 tests) · 참고: 증분 툴콜은 OpenAI 우선(Anthropic/Gemini는 텍스트+헬퍼)
 
 ## T1.3 — A2A + AG-UI HTTP 서버 (`el_graph_web`)
-시작 7.0 → 목표 9.5
+시작 7.0 → **달성 9.5**
 - [2] Plug 라우터 + Agent Card + invoke + AG-UI SSE ✅
-- [ ] A2A JSON-RPC 2.0 준수(message/send, message/stream, tasks/get)
-- [ ] A2A SSE 스트리밍 엔드포인트(message/stream)
-- [ ] `.well-known/agent.json` 표준 경로 + 에러 응답 규약
-- [ ] 라이브 서버 통합 테스트(Bandit 기동 + 실제 HTTP)
-상태: ⬜
+- [2] A2A JSON-RPC 2.0(message/send, tasks/get) + 순수 디스패치 헬퍼 ✅
+- [2] A2A SSE 스트리밍(message/stream → status/artifact-update) ✅
+- [2] `.well-known/agent-card.json` + JSON-RPC 에러규약(-32600/-32601/-32001) + TaskStore ✅
+- [1.5] 라이브 Bandit 통합 테스트(실제 HTTP + Req 라운드트립) ✅
+상태: ✅ (28 tests)
 
 ## T1.4 — OTel 병렬 컨텍스트 전파
 시작 8.5 → 목표 9.5

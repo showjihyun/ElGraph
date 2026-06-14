@@ -20,11 +20,18 @@ defmodule ElGraphWeb do
   @typedoc "에이전트 스펙: 컴파일된 그래프 + Agent Card 옵션."
   @type agent_spec :: %{required(:graph) => ElGraph.Graph.t(), required(:card) => keyword()}
 
-  @doc "호스트 슈퍼비전 트리에 마운트할 Bandit child_spec를 만든다."
+  @doc """
+  호스트 슈퍼비전 트리에 마운트할 Bandit child_spec를 만든다.
+
+  옵션 `:task_store`(A2A Task 저장소 ref — `ElGraphWeb.TaskStore` 등)를 주면 A2A
+  JSON-RPC `message/send`/`tasks/get`가 그 저장소를 쓴다. 저장소 프로세스 자체는 호스트가
+  별도로 슈퍼비전한다(`ElGraphWeb.TaskStore`).
+  """
   @spec server_spec(keyword()) :: Supervisor.child_spec() | {module(), keyword()}
   def server_spec(opts) do
     agents = Keyword.fetch!(opts, :agents)
     port = Keyword.get(opts, :port, 4001)
-    {Bandit, plug: {ElGraphWeb.Endpoint, agents: agents}, port: port}
+    task_store = Keyword.get(opts, :task_store)
+    {Bandit, plug: {ElGraphWeb.Endpoint, agents: agents, task_store: task_store}, port: port}
   end
 end

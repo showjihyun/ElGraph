@@ -33,7 +33,8 @@ defmodule ElGraphWeb.MixProject do
       {:el_graph, in_umbrella: true},
       {:plug, "~> 1.16"},
       {:bandit, "~> 1.5"},
-      {:jason, "~> 1.4"}
+      {:jason, "~> 1.4"},
+      {:req, "~> 0.6"}
     ]
   end
 end
