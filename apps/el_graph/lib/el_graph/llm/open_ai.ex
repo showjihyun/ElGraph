@@ -114,17 +114,78 @@ defmodule ElGraph.LLM.OpenAI do
     end)
   end
 
-  # Req `into:` 콜렉터 — SSE 청크를 파싱하고 토큰을 실시간 방출, 원청크는 누적한다.
+  # Req `into:` 콜렉터 — SSE 청크를 파싱하고 델타를 실시간 방출, 원청크는 누적한다.
+  # 증분 tool-call 방출을 위해 인덱스→id 상태(`stream_acc`)를 청크 간에 잇는다.
   defp stream_collector(on_delta) do
     fn {:data, data}, {req, resp} ->
-      state = resp.private[:el_graph_sse] || %{buffer: "", chunks: []}
+      state =
+        resp.private[:el_graph_sse] || %{buffer: "", chunks: [], stream_acc: new_stream_acc()}
+
       {payloads, buffer} = ElGraph.LLM.SSE.parse(state.buffer, data)
       decoded = Enum.map(payloads, &JSON.decode!/1)
-      Enum.each(decoded, fn chunk -> Enum.each(decode_deltas(chunk), on_delta) end)
-      state = %{buffer: buffer, chunks: state.chunks ++ decoded}
+      stream_acc = Enum.reduce(decoded, state.stream_acc, &stream_step(&1, &2, on_delta))
+      state = %{buffer: buffer, chunks: state.chunks ++ decoded, stream_acc: stream_acc}
       {:cont, {req, Req.Response.put_private(resp, :el_graph_sse, state)}}
     end
   end
+
+  @doc false
+  @spec new_stream_acc() :: map()
+  def new_stream_acc, do: %{tool_index_to_id: %{}}
+
+  @doc false
+  @spec stream_step(map(), map(), (ElGraph.LLM.delta() -> any())) :: map()
+  def stream_step(%{"choices" => [%{"delta" => delta} = choice | _]} = _chunk, acc, on_delta) do
+    emit_token(delta["content"], on_delta)
+    acc = Enum.reduce(delta["tool_calls"] || [], acc, &stream_tool_call(&1, &2, on_delta))
+    maybe_finish_tool_calls(choice["finish_reason"], acc, on_delta)
+  end
+
+  def stream_step(_chunk, acc, _on_delta), do: acc
+
+  defp emit_token(content, on_delta) when is_binary(content) and content != "",
+    do: on_delta.({:token, content})
+
+  defp emit_token(_content, _on_delta), do: :ok
+
+  defp stream_tool_call(%{"index" => index, "id" => id} = call, acc, on_delta)
+       when is_binary(id) do
+    acc =
+      if Map.has_key?(acc.tool_index_to_id, index) do
+        # 같은 index가 이미 시작됨 → 재방출하지 않음.
+        acc
+      else
+        on_delta.({:tool_call_start, id, call["function"]["name"]})
+        put_in(acc.tool_index_to_id[index], id)
+      end
+
+    emit_args_fragment(call, index, acc, on_delta)
+    acc
+  end
+
+  defp stream_tool_call(%{"index" => index} = call, acc, on_delta) do
+    emit_args_fragment(call, index, acc, on_delta)
+    acc
+  end
+
+  defp emit_args_fragment(call, index, acc, on_delta) do
+    case call["function"]["arguments"] do
+      frag when is_binary(frag) and frag != "" ->
+        on_delta.({:tool_call_delta, acc.tool_index_to_id[index], frag})
+
+      _empty ->
+        :ok
+    end
+
+    acc
+  end
+
+  defp maybe_finish_tool_calls("tool_calls", acc, on_delta) do
+    for {_index, id} <- acc.tool_index_to_id, do: on_delta.({:tool_call_end, id})
+    acc
+  end
+
+  defp maybe_finish_tool_calls(_reason, acc, _on_delta), do: acc
 
   @doc false
   @spec decode_deltas(map()) :: [ElGraph.LLM.delta()]

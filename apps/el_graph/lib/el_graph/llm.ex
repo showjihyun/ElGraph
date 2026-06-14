@@ -27,7 +27,11 @@ defmodule ElGraph.LLM do
               {:ok, response()} | {:error, term()}
 
   @typedoc "스트리밍 델타 이벤트 — `on_delta` 콜백이 받는다."
-  @type delta :: {:token, binary()}
+  @type delta ::
+          {:token, binary()}
+          | {:tool_call_start, id :: String.t(), name :: String.t()}
+          | {:tool_call_delta, id :: String.t(), args_fragment :: String.t()}
+          | {:tool_call_end, id :: String.t()}
 
   @doc """
   `chat/3`의 스트리밍 변형. 토큰이 도착하는 대로 `opts[:on_delta]`(`delta()` 1-인자 fun)를
@@ -38,6 +42,20 @@ defmodule ElGraph.LLM do
               {:ok, response()} | {:error, term()}
 
   @optional_callbacks stream_chat: 3
+
+  @doc """
+  노드에서 쓰는 스트리밍 헬퍼. `stream_chat/3`을 호출하되 도착하는 모든 델타를
+  `ctx`의 event_sink로 방출한다(`ElGraph.Ctx.emit/2`). 반환값은 `stream_chat/3`과 동일.
+  """
+  @spec stream_to_ctx({module(), term()}, [message()], keyword(), ElGraph.Ctx.t()) ::
+          {:ok, response()} | {:error, term()}
+  def stream_to_ctx({mod, config}, messages, opts, ctx) do
+    mod.stream_chat(
+      config,
+      messages,
+      Keyword.put(opts, :on_delta, fn delta -> ElGraph.Ctx.emit(ctx, delta) end)
+    )
+  end
 
   @doc "어댑터(`{module, config}`)가 스트리밍(`stream_chat/3`)을 지원하는지 확인한다."
   @spec stream_supported?({module(), term()}) :: boolean()

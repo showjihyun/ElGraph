@@ -88,4 +88,124 @@ defmodule ElGraph.LLM.OpenAIStreamTest do
               }} = OpenAI.reduce_chunks(chunks)
     end
   end
+
+  describe "stream_step/3 — stateful incremental delta reducer" do
+    defp collect(on), do: fn delta -> send(on, {:delta, delta}) end
+
+    defp fold(chunks, on_delta) do
+      Enum.reduce(chunks, %{tool_index_to_id: %{}}, fn chunk, acc ->
+        OpenAI.stream_step(chunk, acc, on_delta)
+      end)
+    end
+
+    test "emits a token delta for content chunks" do
+      fold([text_chunk("Hi")], collect(self()))
+      assert_received {:delta, {:token, "Hi"}}
+    end
+
+    test "emits start/delta/end deltas for an incrementally streamed tool call" do
+      chunks = [
+        %{
+          "choices" => [
+            %{
+              "delta" => %{
+                "tool_calls" => [
+                  %{
+                    "index" => 0,
+                    "id" => "call_1",
+                    "function" => %{"name" => "web_search", "arguments" => ""}
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        %{
+          "choices" => [
+            %{
+              "delta" => %{
+                "tool_calls" => [%{"index" => 0, "function" => %{"arguments" => "{\"q"}}]
+              }
+            }
+          ]
+        },
+        %{
+          "choices" => [
+            %{
+              "delta" => %{
+                "tool_calls" => [%{"index" => 0, "function" => %{"arguments" => "\":\"x\"}"}}]
+              }
+            }
+          ]
+        },
+        %{"choices" => [%{"delta" => %{}, "finish_reason" => "tool_calls"}]}
+      ]
+
+      fold(chunks, collect(self()))
+
+      assert_received {:delta, {:tool_call_start, "call_1", "web_search"}}
+      assert_received {:delta, {:tool_call_delta, "call_1", "{\"q"}}
+      assert_received {:delta, {:tool_call_delta, "call_1", "\":\"x\"}"}}
+      assert_received {:delta, {:tool_call_end, "call_1"}}
+    end
+
+    test "does not re-emit tool_call_start for the same index" do
+      chunks = [
+        %{
+          "choices" => [
+            %{
+              "delta" => %{
+                "tool_calls" => [
+                  %{
+                    "index" => 0,
+                    "id" => "call_1",
+                    "function" => %{"name" => "f", "arguments" => ""}
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        %{
+          "choices" => [
+            %{
+              "delta" => %{
+                "tool_calls" => [%{"index" => 0, "function" => %{"arguments" => "a"}}]
+              }
+            }
+          ]
+        }
+      ]
+
+      fold(chunks, collect(self()))
+
+      assert_received {:delta, {:tool_call_start, "call_1", "f"}}
+      assert_received {:delta, {:tool_call_delta, "call_1", "a"}}
+      refute_received {:delta, {:tool_call_start, "call_1", "f"}}
+    end
+  end
+
+  describe "stream_chat/3 — error handling" do
+    test "maps a non-200 streaming response to {:api_error, status, body}" do
+      Req.Test.stub(OpenAIStreamErrStub, fn conn ->
+        conn |> Plug.Conn.put_status(429) |> Plug.Conn.send_resp(429, "rate limited")
+      end)
+
+      config = [api_key: "k", req_options: [plug: {Req.Test, OpenAIStreamErrStub}]]
+
+      assert {:error, {:api_error, 429, _body}} =
+               OpenAI.stream_chat(config, [ElGraph.LLM.user("hi")], [])
+    end
+
+    test "maps a transport failure to {:transport_error, exception}" do
+      Req.Test.stub(OpenAIStreamTransportStub, fn conn ->
+        Req.Test.transport_error(conn, :econnrefused)
+      end)
+
+      config = [api_key: "k", req_options: [plug: {Req.Test, OpenAIStreamTransportStub}]]
+
+      assert {:error, {:transport_error, %Req.TransportError{reason: :econnrefused}}} =
+               OpenAI.stream_chat(config, [ElGraph.LLM.user("hi")], [])
+    end
+  end
 end

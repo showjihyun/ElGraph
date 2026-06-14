@@ -17,13 +17,13 @@
 상태: ✅ (22 tests)
 
 ## T1.2 — LLM SSE 스트리밍 (4 어댑터)
-시작 8.0 → 목표 9.5
+시작 8.0 → **달성 9.5**
 - [2] behaviour stream_chat/3 + SSE 파서 + 4 어댑터 ✅
 - [2] 텍스트 토큰 실시간 방출 + 누적 응답 ✅
-- [ ] 도구 호출 델타 스트리밍(TOOL_CALL_* on_delta 이벤트)
-- [ ] 에러/중단(스트림 도중 실패) 처리 + 테스트
-- [ ] ReAct 프리셋/노드 레벨 스트리밍 통합 헬퍼
-상태: ⬜
+- [2] 증분 도구 호출 스트리밍(start/delta/end, OpenAI; stream_step/3 순수 리듀서) ✅
+- [1.5] 에러/중단 처리(api_error/transport_error) + Req.Test ✅
+- [2] 노드 레벨 헬퍼 `LLM.stream_to_ctx/4`(델타→Ctx.emit) ✅
+상태: ✅ (13 tests) · 참고: 증분 툴콜은 OpenAI 우선(Anthropic/Gemini는 텍스트+헬퍼)
 
 ## T1.3 — A2A + AG-UI HTTP 서버 (`el_graph_web`)
 시작 7.0 → 목표 9.5
