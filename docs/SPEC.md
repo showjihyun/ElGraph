@@ -5,7 +5,7 @@
 
 상태: v0.9 (설계 검토 R1~R5 반영, M1~M4 완료 · M5 코어 완료) · 2026-06-13
 
-**구현 현황 요약**: 테스트 455개(el_graph 400 + el_graph_web 28 + el_trace 27) + 통합 다수(실 OpenAI 등), 전부 `async: true`. 코어(L1) 런타임
+**구현 현황 요약**: 테스트 460개(el_graph 403 + el_graph_web 28 + el_trace 29) + 통합 다수(실 OpenAI 등), 전부 `async: true`. 코어(L1) 런타임
 의존성 `:telemetry` 1개. 실 OpenAI로 도는 문서 Q&A 에이전트, 센서→버스→에이전트 체인,
 2-에이전트 파이프라인이 동작 검증됨. 구현 로드맵·완료 기준은 §8, 실사용 관찰은 `DOGFOODING.md`.
 
@@ -313,6 +313,30 @@ SPEC 본문은 설계 시점 표기를 유지한다. 실제 구현이 본문과 
 **ElTrace 프로토타입 착수 (2026-06-14)**: Langfuse 관찰(도그푸딩 세션 8) 결과 "ElGraph가 체크포인트·버스로 아는 인과를 Langfuse는 모른다"는 4개 차별점을 데이터로 확정 — #1 인터럽트 가시성, #2 thread 생애(invoke→interrupt→resume), #3 멀티 에이전트 핸드오프, #4 time-travel 재개. 우선순위 #1·#2를 구현: `ElTrace.Timeline`(체크포인트 체인 → 생애 타임라인 + 텍스트 렌더). 선결로 `Checkpoint.interrupt_info`(node+payload)를 추가 — 동적 인터럽트가 기록하고 재개 후에도 보존(Langfuse가 못 보여준 "왜 멈췄나"의 데이터 소스). 시연: `scripts/eltrace_demo.exs`. **방침**: ElTrace는 범용 trace(span/토큰)를 재구현하지 않고 Langfuse에 위임 — 체크포인트가 아는 인과만 다룬다. **구조**: `lib/el_trace/`에 두되 ElGraph 의존은 Checkpointer behaviour뿐 — 별도 앱(`el_trace`) 분리에 유리.
 
 **#4 time-travel 재개 추가**: `ElTrace.Replay.from/5` + `Executor.resume_from/3` — 임의 과거 step의 체크포인트 상태로 새 thread를 분기(fork)해 재실행, 원래 thread 보존. "if 시나리오"(승인↔거절) 탐색이 안전하게 가능 — Langfuse가 trace를 보여주기만 하는 것과 대비되는 ElGraph만의 기능. 시연으로 검증(승인 완료 thread 보존 + step 1로 되감아 거절 분기). **#1·#2·#4의 데이터/제어 계층이 전부 Phoenix 없이 동작** — LiveView는 이 위의 순수 표현 작업(Timeline 시각화 + 인터럽트 승인/Replay 버튼). 잔여: LiveView 실시간 UI(Phoenix 의존, `el_trace` 앱 분리 권장), #3 핸드오프 그래프(버스 시그널 인과). **자체 관측 도구(ElTrace) 방침**: 풀 Langfuse 클론은 비목표. ElGraph 차별점(체크포인트 time-travel·LiveView 실시간·BEAM 내장)만 OTel 위에 쌓는다 — Langfuse로 한동안 도그푸딩 후 추출.
+
+## 14. 보고서 반영 확장 (2026-06, Agentic AI 트렌드)
+
+`docs/agentic-ai-2026-report.html`의 2026 트렌드 분석을 근거로 추가·심화한 기능. 각 항목은
+계획→TDD→테스트로 구현했고 항목별 완성도 9.5/10을 목표로 함(추적: `docs/report-checklist.md`).
+모든 모듈은 기존 프리미티브 위의 격리된 추가이며 코어 실행기 의존을 늘리지 않는다.
+
+| # | 기능 | 모듈 / 앱 | 요지 | 테스트 |
+|---|---|---|---|---|
+| T1.1 | **AG-UI 매핑** | `ElGraph.AGUI` | ElGraph 스트림 → AG-UI 이벤트 시퀀스(RUN/STEP/TEXT_MESSAGE/TOOL_CALL/STATE_SNAPSHOT/STATE_DELTA/MESSAGES_SNAPSHOT/CUSTOM). 노드 단위 메시지 프레이밍, `transform/3`(상태추적)·`encode/1`(무상태) | 22 |
+| T1.2 | **LLM SSE 스트리밍** | `ElGraph.LLM` + `LLM.SSE` + OpenAI/Anthropic/Gemini | 선택 콜백 `stream_chat/3`, 순수 SSE 프레이밍, 증분 토큰 + (OpenAI) 증분 도구호출 델타, 노드 헬퍼 `LLM.stream_to_ctx/4`, 에러 매핑 | 31+ |
+| T1.3 | **A2A + AG-UI HTTP 서버** | `el_graph_web`(신규 앱) | Plug/Bandit. A2A JSON-RPC 2.0(`message/send`·`tasks/get`·`message/stream` SSE), `.well-known/agent-card.json`, `TaskStore`, AG-UI `/agui/:name/run` SSE. `server_spec/1`로 호스트 마운트(전역 서버 자동기동 안 함) | 28 |
+| T1.4 | **OTel 병렬 컨텍스트 전파** | `ElGraph.Executor.exec_all`, `OTel.Mapping` | 병렬 Task에 부모 OTel 컨텍스트 캡처+attach → 노드 span이 invoke span 아래 중첩. Mapping에 invoke/node `error.type` 추가 | 8 + 연계 |
+| T2.5 | **오케스트레이션 템플릿** | `ElGraph.Orchestration` | `supervisor/3`(오케스트레이터-워커), `group_chat/2`(스피커 선택 정책), `magentic/3`(task-ledger + 무한루프 stall guard) | 11 + int |
+| T2.6 | **고급 메모리** | `ElGraph.Memory` (+`Memory.Embedder`) | 3-스코프(episodic/semantic/procedural) + 시점진실(latest-wins), 시맨틱 recall(`recall_relevant/4`, cosine), supersede 이력(`fact_history/3`), `forget/4`. Store behaviour만 사용 | 16 |
+| T3.8 | **Evals** | `ElGraph.Eval` | 데이터셋 평가 + 플러그형 스코어러 + LLM-judge, **체크포인트-리플레이 평가**(`replay_eval/6`, time-travel), 병렬 평가 + 집계 메트릭, JSONL 로딩, baseline 회귀 비교(`compare/2`) | 13 |
+| T3.9 | **가드레일 / 정책** | `ElGraph.Guardrail` (+`Guardrail.PII`) | deny/redact/max_length/authorize_tool + PII 라이브러리(email/phone/card/ssn/rrn/ipv4), 구조화 출력 검증(`validate_schema/1`, NimbleOptions), 차단 telemetry, 노드 통합 `guard_value/4` | 25 |
+| T3.10 | **샌드박스 코드 실행** | `ElGraph.Sandbox`(+`.Command`/`.Docker`) + `Actions.CodeExec` | 외부 격리 위임 behaviour. 타임아웃(`run_with_timeout`, 누수 없음)·출력 크기 제한, Docker 백엔드(`--network=none`/`--read-only`/mem·cpu 기본값). **인프로세스 eval 안 함** | 16 + int |
+
+> T2.7(내구 실행 · Postgres/Redis/DETS/Mnesia 체크포인터)은 §3.5에 반영됨(별도 작업으로 완료).
+
+**관측 연계 검증**: ① **Langfuse 파이프라인** — `test/el_graph/otel/langfuse_pipeline_test.exs`(`:integration`)가 OTel SDK + pid exporter로 telemetry→Bridge→OTel span을 포착해 `invoke_workflow` 아래 병렬 노드 span 중첩을 단언(Langfuse가 OTLP로 받는 바로 그 데이터). ② **ElTrace** — `apps/el_trace/test/el_trace/new_features_integration_test.exs`가 멀티 에이전트 오케스트레이션 실행의 체크포인트 체인을 ElTrace 생애 타임라인으로 관측·분기(time-travel)함을 단언.
+
+**현황 요약(2026-06)**: el_graph 403 + el_graph_web 28 + el_trace 29 = 460 테스트(전부 async) + 통합 다수. 품질 루브릭은 `docs/quality-rubric.md`.
 
 ## 부록 A — LangGraph 약점 대응표
 

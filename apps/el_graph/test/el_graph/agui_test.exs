@@ -3,6 +3,8 @@ defmodule ElGraph.AGUITest do
 
   alias ElGraph.AGUI
 
+  doctest ElGraph.AGUI
+
   describe "lifecycle event constructors" do
     test "run_started/2 builds a RUN_STARTED event" do
       assert %{"type" => "RUN_STARTED", "threadId" => "t1", "runId" => "r1"} =

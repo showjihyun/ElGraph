@@ -20,7 +20,12 @@ defmodule ElGraph.AGUI do
 
   @type event :: %{String.t() => term()}
 
-  @doc "RUN_STARTED 이벤트."
+  @doc """
+  RUN_STARTED 이벤트.
+
+      iex> ElGraph.AGUI.run_started("t1", "r1")["type"]
+      "RUN_STARTED"
+  """
   @spec run_started(String.t(), String.t()) :: event()
   def run_started(thread_id, run_id),
     do: %{"type" => "RUN_STARTED", "threadId" => thread_id, "runId" => run_id}
@@ -30,7 +35,12 @@ defmodule ElGraph.AGUI do
   def run_finished(thread_id, run_id),
     do: %{"type" => "RUN_FINISHED", "threadId" => thread_id, "runId" => run_id}
 
-  @doc "RUN_ERROR 이벤트."
+  @doc """
+  RUN_ERROR 이벤트.
+
+      iex> ElGraph.AGUI.run_error("boom")["message"]
+      "boom"
+  """
   @spec run_error(String.t()) :: event()
   def run_error(message), do: %{"type" => "RUN_ERROR", "message" => message}
 
@@ -47,7 +57,12 @@ defmodule ElGraph.AGUI do
   def messages_snapshot(messages) when is_list(messages),
     do: %{"type" => "MESSAGES_SNAPSHOT", "messages" => messages}
 
-  @doc "CUSTOM 이벤트 — 프레임워크 밖 임의 이벤트(메트릭 등)."
+  @doc """
+  CUSTOM 이벤트 — 프레임워크 밖 임의 이벤트(메트릭 등).
+
+      iex> ElGraph.AGUI.custom("metric", 5)["value"]
+      5
+  """
   @spec custom(String.t(), term()) :: event()
   def custom(name, value), do: %{"type" => "CUSTOM", "name" => name, "value" => value}
 
