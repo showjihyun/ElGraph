@@ -21,4 +21,7 @@ config :esbuild,
 
 config :phoenix, :json_library, Jason
 
+# 내구 체크포인터(Postgres) — mix ecto.* 태스크가 인지하도록.
+config :el_graph_ecto, ecto_repos: [ElGraphEcto.Repo]
+
 import_config "#{config_env()}.exs"

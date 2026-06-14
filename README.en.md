@@ -22,7 +22,7 @@ user input ─▶ [run graph] ─▶ checkpoint after every step
 ## ✨ Highlights
 
 - **Graph core** — state channels/reducers, conditional edges, parallel fan-out, subgraphs. Only one runtime dependency: `:telemetry`.
-- **Durable execution** — checkpoint → resume. A partially failed parallel step preserves the work that succeeded, avoiding duplicate LLM calls.
+- **Durable execution** — checkpoint → resume. A partially failed parallel step preserves the work that succeeded, avoiding duplicate LLM calls. Swappable backends: **ETS** (default, in-memory) · **Postgres** · **Valkey/Redis**.
 - **Human-in-the-loop (HITL)** — pause before or inside a node, take a human's answer, and continue from that exact point.
 - **Time-travel** — fork a new thread from any past checkpoint. The original is preserved.
 - **Agent runtime** — GenServer agents, a signal bus, a ReAct preset, LLM/MCP adapters, cost guards.
@@ -149,12 +149,28 @@ the Python ecosystem is your core need, LangGraph is the more comfortable choice
 ```
 ElGraph/                  # umbrella root (run mix test / mix format here)
 ├─ apps/
-│  ├─ el_graph/           # core runtime — graph, checkpoints, agents, LLM/MCP
-│  └─ el_trace/           # observability UI — Phoenix/LiveView (depends on el_graph)
+│  ├─ el_graph/           # core runtime — graph, checkpoints, agents, LLM/MCP (zero deps)
+│  ├─ el_trace/           # observability UI — Phoenix/LiveView (depends on el_graph)
+│  ├─ el_graph_ecto/      # durable checkpointer — Postgres (Ecto)
+│  └─ el_graph_redis/     # durable checkpointer — Valkey/Redis (Redix)
 ├─ examples/
 │  └─ observed_agent/     # example of consuming el_graph + el_trace as dependencies
 ├─ config/                # shared config (secrets.exs is gitignored)
+├─ docker-compose.yml     # Postgres/Valkey for DB-backend tests
 └─ docs/                  # full design spec, environment, testing conventions
+```
+
+Durable checkpointers are **swappable adapters** implementing the core `ElGraph.Checkpointer`
+behaviour. ETS is in-memory (fast, but lost on restart); Postgres/Valkey resume threads across
+restarts and node replacement:
+
+```elixir
+# Postgres
+cp = {ElGraph.Checkpointer.Postgres, ElGraph.Checkpointer.Postgres.config(MyApp.Repo)}
+# Valkey/Redis
+cp = {ElGraph.Checkpointer.Redis, ElGraph.Checkpointer.Redis.config(:my_redix)}
+
+ElGraph.invoke(graph, input, checkpointer: cp, thread_id: "t1")
 ```
 
 - Use **`el_graph`** alone for a headless (server-less) agent runtime.

@@ -1,0 +1,22 @@
+# 내구 체크포인터 어댑터(el_graph_ecto / el_graph_redis) 테스트용 로컬 DB.
+#
+#   docker compose up -d
+#   mix test          # DB가 떠 있으면 :postgres/:redis 계약 테스트가 자동 포함된다
+#                     # (DB가 없으면 해당 테스트는 자동 제외되고 나머지는 통과)
+#
+# 포트는 호스트의 기존 5432/6379와 겹치지 않게 5433/6380을 쓴다.
+# 다른 포트를 쓰려면 ELGRAPH_PG_PORT / ELGRAPH_REDIS_PORT 환경변수로 덮어쓴다.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: el_graph_test
+    ports:
+      - "5433:5432"
+
+  valkey:
+    image: valkey/valkey:8
+    ports:
+      - "6380:6379"

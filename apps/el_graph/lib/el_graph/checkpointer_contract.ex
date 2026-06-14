@@ -3,6 +3,10 @@ defmodule ElGraph.CheckpointerContract do
   모든 체크포인터 어댑터가 통과해야 하는 공유 계약 테스트 (SPEC §3.5, TDD-SPEC §4).
 
   사용하는 테스트 모듈은 `setup`에서 `%{mod: 어댑터모듈, config: 어댑터설정}`을 제공해야 한다.
+
+  별도 앱의 어댑터(`el_graph_ecto`, `el_graph_redis` 등)도 `use ElGraph.CheckpointerContract`
+  한 줄로 동일 계약을 검증한다. 테스트 전용 매크로지만 다운스트림 어댑터가 재사용해야 하므로
+  `lib/`에 둔다(컴파일 비용 0 — `__using__` 매크로 정의일 뿐).
   """
 
   defmacro __using__(_opts) do

@@ -15,9 +15,13 @@
 표방하는 것에 비해 **체크포인터가 ETS(휘발성) 하나뿐**인 점이 가장 큰 약점이다. 아래 P0를 닫으면
 README의 LangGraph 비교가 마케팅이 아니라 사실이 된다.
 
+> **진행 현황 (2026-06)**: **P0-1 완료** — `el_graph_ecto`(Postgres) + `el_graph_redis`(Valkey/Redis)
+> 어댑터를 추가하고 공유 계약 테스트(`ElGraph.CheckpointerContract`, lib로 이동해 재사용)로 검증했다.
+> 직렬화는 `:erlang.term_to_binary/1`(bytea / RESP). DB 미가용 시 테스트는 자동 제외. `docker-compose.yml` 제공.
+
 | 우선순위 | 항목 | 한 줄 | 아키텍처 영향 |
 |---|---|---|---|
-| **P0** | 내구 체크포인터 백엔드 (Postgres/Mnesia) | ETS는 노드 재시작 시 소실 → "durable" 주장과 모순 | 신규 앱 `el_graph_ecto` (behaviour는 이미 존재) |
+| ✅ **P0** | 내구 체크포인터 백엔드 (Postgres/Valkey) | ~~ETS만~~ → Postgres·Valkey/Redis 어댑터 추가 완료 | 신규 앱 `el_graph_ecto`·`el_graph_redis` |
 | **P0** | OTel GenAI semconv 마감 | 이미 `gen_ai.*` 방출 중 — 표준 최신화만 | 단일 모듈 수정 |
 | **P1** | LLM 토큰 스트리밍 (SSE) | 현재 미구현(SPEC 명시), LiveView와 시너지 | LLM 어댑터 + `stream/3` 모드 |
 | **P1** | 구조화 출력 노드 (검증+재시도) | Instructor/Pydantic 패턴 — 노드 간 타입 계약 | `el_graph` 내 신규 노드 헬퍼 |

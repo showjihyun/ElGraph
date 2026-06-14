@@ -22,7 +22,7 @@ LLM 에이전트를 **상태 채널 + 노드 + 엣지**로 선언하면, ElGraph
 ## ✨ 핵심 특징
 
 - **그래프 코어** — 상태 채널/reducer, 조건부 엣지, 병렬 fan-out, 서브그래프. 런타임 의존성은 `:telemetry` 하나.
-- **내구 실행** — 체크포인트 저장 → 재개. 부분 실패한 병렬 단계도 성공한 작업을 보존해 LLM 중복 호출을 막는다.
+- **내구 실행** — 체크포인트 저장 → 재개. 부분 실패한 병렬 단계도 성공한 작업을 보존해 LLM 중복 호출을 막는다. 백엔드 교체 가능: **ETS**(기본·인메모리) · **Postgres** · **Valkey/Redis**.
 - **사람 개입(HITL)** — 노드 앞이나 노드 안에서 멈춰 사람의 답을 받고 그 지점부터 이어간다.
 - **time-travel** — 임의 과거 체크포인트에서 새 thread로 분기. 원본은 보존된다.
 - **에이전트 런타임** — GenServer 에이전트, 시그널 버스, ReAct 프리셋, LLM/MCP 어댑터, 비용 가드.
@@ -144,12 +144,27 @@ Python 우선이고, 커뮤니티·튜토리얼·인력 풀도 압도적이다. 
 ```
 ElGraph/                  # 우산 루트 (여기서 mix test / mix format)
 ├─ apps/
-│  ├─ el_graph/           # 코어 런타임 — 그래프·체크포인트·에이전트·LLM/MCP
-│  └─ el_trace/           # 관측 UI — Phoenix/LiveView (el_graph에 의존)
+│  ├─ el_graph/           # 코어 런타임 — 그래프·체크포인트·에이전트·LLM/MCP (의존성 0)
+│  ├─ el_trace/           # 관측 UI — Phoenix/LiveView (el_graph에 의존)
+│  ├─ el_graph_ecto/      # 내구 체크포인터 — Postgres (Ecto)
+│  └─ el_graph_redis/     # 내구 체크포인터 — Valkey/Redis (Redix)
 ├─ examples/
 │  └─ observed_agent/     # el_graph+el_trace를 "의존성으로 끌어다 쓰는" 예제
 ├─ config/                # 공유 설정 (secrets.exs는 gitignore)
+├─ docker-compose.yml     # DB 백엔드 테스트용 Postgres/Valkey
 └─ docs/                  # 설계 전문·환경·테스트 규약
+```
+
+내구 체크포인터는 코어의 `ElGraph.Checkpointer` behaviour를 구현한 **교체 가능한 어댑터**다.
+ETS는 인메모리(빠르지만 재시작 시 소실), Postgres/Valkey는 재시작·노드 교체를 넘어 thread를 재개한다:
+
+```elixir
+# Postgres
+cp = {ElGraph.Checkpointer.Postgres, ElGraph.Checkpointer.Postgres.config(MyApp.Repo)}
+# Valkey/Redis
+cp = {ElGraph.Checkpointer.Redis, ElGraph.Checkpointer.Redis.config(:my_redix)}
+
+ElGraph.invoke(graph, input, checkpointer: cp, thread_id: "t1")
 ```
 
 - **`el_graph`** 만 쓰면 헤드리스(서버 없이) 에이전트 런타임이다.

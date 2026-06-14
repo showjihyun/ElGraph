@@ -78,6 +78,21 @@ Set-Location apps\el_trace; mix phx.server   # http://localhost:4000
 시드해 페이지에 바로 표시한다. (참고: Windows에서 심볼릭 링크 권한이 없으면 Phoenix가 정적 자산을
 비워 서빙할 수 있다 — 터미널을 한 번 "관리자 권한으로 실행"하면 해소된다.)
 
+### 내구 체크포인터 테스트 (Postgres / Valkey)
+
+`el_graph_ecto`(Postgres)·`el_graph_redis`(Valkey/Redis) 어댑터의 계약 테스트는 실제 DB가 필요하다.
+**DB가 없어도 `mix test`는 통과한다** — 해당 테스트(`:postgres`/`:redis` 태그)는 자동 제외된다.
+DB를 띄우면 자동 포함된다:
+
+```powershell
+docker compose up -d          # Postgres(5433) + Valkey(6380)
+mix test                      # :postgres/:redis 계약 테스트가 포함되어 실행됨
+docker compose down           # 정리
+```
+
+포트를 바꾸려면 `ELGRAPH_PG_PORT` / `ELGRAPH_REDIS_PORT`(그리고 `ELGRAPH_PG_HOST` 등) 환경변수로
+덮어쓴다. 새 체크포인터 어댑터는 `use ElGraph.CheckpointerContract` 한 줄로 동일 계약을 검증한다.
+
 ## 업데이트 / 버전 확인
 
 ```powershell
