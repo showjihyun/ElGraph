@@ -43,6 +43,49 @@ defmodule ElGraph.LLM.AnthropicStreamTest do
     end
   end
 
+  describe "stream_step/3 — incremental tool-call deltas" do
+    test "emits tool_call_start/delta/end across chunks" do
+      parent = self()
+      on_delta = fn d -> send(parent, {:d, d}) end
+
+      chunks = [
+        %{
+          "type" => "content_block_start",
+          "index" => 0,
+          "content_block" => %{"type" => "tool_use", "id" => "toolu_1", "name" => "web_search"}
+        },
+        %{
+          "type" => "content_block_delta",
+          "index" => 0,
+          "delta" => %{"type" => "input_json_delta", "partial_json" => "{\"q\":"}
+        },
+        %{
+          "type" => "content_block_delta",
+          "index" => 0,
+          "delta" => %{"type" => "input_json_delta", "partial_json" => "\"x\"}"}
+        },
+        %{"type" => "content_block_stop", "index" => 0}
+      ]
+
+      Enum.reduce(chunks, Anthropic.new_stream_acc(), &Anthropic.stream_step(&1, &2, on_delta))
+
+      assert_received {:d, {:tool_call_start, "toolu_1", "web_search"}}
+      assert_received {:d, {:tool_call_delta, "toolu_1", "{\"q\":"}}
+      assert_received {:d, {:tool_call_delta, "toolu_1", "\"x\"}"}}
+      assert_received {:d, {:tool_call_end, "toolu_1"}}
+    end
+
+    test "emits a token for a text delta" do
+      parent = self()
+
+      Anthropic.stream_step(text_delta("hi"), Anthropic.new_stream_acc(), fn d ->
+        send(parent, {:d, d})
+      end)
+
+      assert_received {:d, {:token, "hi"}}
+    end
+  end
+
   describe "reduce_chunks/1 — assemble final response" do
     test "concatenates text deltas into the assistant message" do
       chunks = [

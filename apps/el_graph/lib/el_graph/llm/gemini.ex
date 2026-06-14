@@ -116,17 +116,46 @@ defmodule ElGraph.LLM.Gemini do
     end)
   end
 
-  # Req `into:` 콜렉터 — SSE 청크를 파싱하고 토큰을 실시간 방출, 원청크는 누적한다.
+  # Req `into:` 콜렉터 — SSE 청크를 파싱하고 델타를 실시간 방출, 원청크는 누적한다.
   defp stream_collector(on_delta) do
     fn {:data, data}, {req, resp} ->
-      state = resp.private[:el_graph_sse] || %{buffer: "", chunks: []}
+      state =
+        resp.private[:el_graph_sse] || %{buffer: "", chunks: [], stream_acc: new_stream_acc()}
+
       {payloads, buffer} = ElGraph.LLM.SSE.parse(state.buffer, data)
       decoded = Enum.map(payloads, &JSON.decode!/1)
-      Enum.each(decoded, fn chunk -> Enum.each(decode_deltas(chunk), on_delta) end)
-      state = %{buffer: buffer, chunks: state.chunks ++ decoded}
+      stream_acc = Enum.reduce(decoded, state.stream_acc, &stream_step(&1, &2, on_delta))
+      state = %{buffer: buffer, chunks: state.chunks ++ decoded, stream_acc: stream_acc}
       {:cont, {req, Req.Response.put_private(resp, :el_graph_sse, state)}}
     end
   end
+
+  @doc false
+  @spec new_stream_acc() :: map()
+  def new_stream_acc, do: %{}
+
+  # Gemini는 functionCall을 한 청크에 완결로 보낸다 — 증분 args가 없으므로 start/delta/end를
+  # 합성해 다른 어댑터와 동일한 델타 어휘로 노출한다(id=툴 이름, parse_response/1과 일관).
+  @doc false
+  @spec stream_step(map(), map(), (ElGraph.LLM.delta() -> any())) :: map()
+  def stream_step(%{"candidates" => [%{"content" => %{"parts" => parts}} | _]}, acc, on_delta) do
+    Enum.each(parts, &emit_part(&1, on_delta))
+    acc
+  end
+
+  def stream_step(_chunk, acc, _on_delta), do: acc
+
+  defp emit_part(%{"text" => text}, on_delta) when is_binary(text) and text != "",
+    do: on_delta.({:token, text})
+
+  defp emit_part(%{"functionCall" => call}, on_delta) do
+    name = call["name"]
+    on_delta.({:tool_call_start, name, name})
+    on_delta.({:tool_call_delta, name, JSON.encode!(call["args"] || %{})})
+    on_delta.({:tool_call_end, name})
+  end
+
+  defp emit_part(_part, _on_delta), do: :ok
 
   @doc false
   @spec decode_deltas(map()) :: [ElGraph.LLM.delta()]

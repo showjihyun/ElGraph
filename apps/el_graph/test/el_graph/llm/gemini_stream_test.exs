@@ -33,6 +33,40 @@ defmodule ElGraph.LLM.GeminiStreamTest do
     end
   end
 
+  describe "stream_step/3 — tool-call deltas (Gemini sends functionCall whole)" do
+    test "emits tool_call_start/delta/end for a functionCall part" do
+      parent = self()
+      on_delta = fn d -> send(parent, {:d, d}) end
+
+      chunk = %{
+        "candidates" => [
+          %{
+            "content" => %{
+              "parts" => [%{"functionCall" => %{"name" => "web_search", "args" => %{"q" => "x"}}}]
+            }
+          }
+        ]
+      }
+
+      Gemini.stream_step(chunk, Gemini.new_stream_acc(), on_delta)
+
+      assert_received {:d, {:tool_call_start, "web_search", "web_search"}}
+      assert_received {:d, {:tool_call_delta, "web_search", args_json}}
+      assert_received {:d, {:tool_call_end, "web_search"}}
+      assert args_json =~ "x"
+    end
+
+    test "emits a token for a text part" do
+      parent = self()
+
+      Gemini.stream_step(text_chunk("hi"), Gemini.new_stream_acc(), fn d ->
+        send(parent, {:d, d})
+      end)
+
+      assert_received {:d, {:token, "hi"}}
+    end
+  end
+
   describe "reduce_chunks/1 — assemble final response" do
     test "concatenates text deltas into the assistant message" do
       chunks = [text_chunk("Hel"), text_chunk("lo"), text_chunk(" world")]

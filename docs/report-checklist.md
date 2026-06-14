@@ -23,7 +23,7 @@
 - [2] 증분 도구 호출 스트리밍(start/delta/end, OpenAI; stream_step/3 순수 리듀서) ✅
 - [1.5] 에러/중단 처리(api_error/transport_error) + Req.Test ✅
 - [2] 노드 레벨 헬퍼 `LLM.stream_to_ctx/4`(델타→Ctx.emit) ✅
-상태: ✅ (13 tests) · 참고: 증분 툴콜은 OpenAI 우선(Anthropic/Gemini는 텍스트+헬퍼)
+상태: ✅ (17 tests) · 증분 툴콜 스트리밍 3개 어댑터 전체 동치화(Gemini는 functionCall 완결형→start/delta/end 합성)
 
 ## T1.3 — A2A + AG-UI HTTP 서버 (`el_graph_web`)
 시작 7.0 → **달성 9.5**

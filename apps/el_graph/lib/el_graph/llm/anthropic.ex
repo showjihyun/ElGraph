@@ -124,17 +124,77 @@ defmodule ElGraph.LLM.Anthropic do
     end)
   end
 
-  # Req `into:` 콜렉터 — SSE 청크를 파싱하고 토큰을 실시간 방출, 원청크는 누적한다.
+  # Req `into:` 콜렉터 — SSE 청크를 파싱하고 델타를 실시간 방출, 원청크는 누적한다.
+  # 증분 tool-call 방출을 위해 인덱스→id 상태(`stream_acc`)를 청크 간에 잇는다.
   defp stream_collector(on_delta) do
     fn {:data, data}, {req, resp} ->
-      state = resp.private[:el_graph_sse] || %{buffer: "", chunks: []}
+      state =
+        resp.private[:el_graph_sse] || %{buffer: "", chunks: [], stream_acc: new_stream_acc()}
+
       {payloads, buffer} = ElGraph.LLM.SSE.parse(state.buffer, data)
       decoded = Enum.map(payloads, &JSON.decode!/1)
-      Enum.each(decoded, fn chunk -> Enum.each(decode_deltas(chunk), on_delta) end)
-      state = %{buffer: buffer, chunks: state.chunks ++ decoded}
+      stream_acc = Enum.reduce(decoded, state.stream_acc, &stream_step(&1, &2, on_delta))
+      state = %{buffer: buffer, chunks: state.chunks ++ decoded, stream_acc: stream_acc}
       {:cont, {req, Req.Response.put_private(resp, :el_graph_sse, state)}}
     end
   end
+
+  @doc false
+  @spec new_stream_acc() :: map()
+  def new_stream_acc, do: %{tool_index_to_id: %{}}
+
+  @doc false
+  @spec stream_step(map(), map(), (ElGraph.LLM.delta() -> any())) :: map()
+  def stream_step(
+        %{"type" => "content_block_delta", "delta" => %{"type" => "text_delta", "text" => text}},
+        acc,
+        on_delta
+      )
+      when is_binary(text) and text != "" do
+    on_delta.({:token, text})
+    acc
+  end
+
+  def stream_step(
+        %{
+          "type" => "content_block_start",
+          "index" => index,
+          "content_block" => %{"type" => "tool_use", "id" => id, "name" => name}
+        },
+        acc,
+        on_delta
+      ) do
+    on_delta.({:tool_call_start, id, name})
+    put_in(acc.tool_index_to_id[index], id)
+  end
+
+  def stream_step(
+        %{
+          "type" => "content_block_delta",
+          "index" => index,
+          "delta" => %{"type" => "input_json_delta", "partial_json" => frag}
+        },
+        acc,
+        on_delta
+      )
+      when is_binary(frag) and frag != "" do
+    emit_tool_delta(acc.tool_index_to_id[index], frag, on_delta)
+    acc
+  end
+
+  def stream_step(%{"type" => "content_block_stop", "index" => index}, acc, on_delta) do
+    case acc.tool_index_to_id[index] do
+      nil -> :ok
+      id -> on_delta.({:tool_call_end, id})
+    end
+
+    acc
+  end
+
+  def stream_step(_chunk, acc, _on_delta), do: acc
+
+  defp emit_tool_delta(nil, _frag, _on_delta), do: :ok
+  defp emit_tool_delta(id, frag, on_delta), do: on_delta.({:tool_call_delta, id, frag})
 
   @doc false
   @spec decode_deltas(map()) :: [ElGraph.LLM.delta()]
