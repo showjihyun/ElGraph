@@ -116,4 +116,71 @@ defmodule ElGraph.OrchestrationTest do
                ElGraph.invoke(graph, %{messages: [LLM.user("go")]})
     end
   end
+
+  describe "magentic/3 — task-ledger orchestration" do
+    test "routes to each chosen worker then terminates on DONE" do
+      {:ok, llm} =
+        ScriptedLLM.start_link([
+          LLM.assistant("researcher"),
+          LLM.assistant("writer"),
+          LLM.assistant("DONE")
+        ])
+
+      graph = Orchestration.magentic({ScriptedLLM, llm}, workers(), [])
+
+      assert {:ok, %{messages: messages}} =
+               ElGraph.invoke(graph, %{messages: [LLM.user("Write a report")]})
+
+      contents = for %{content: c} when is_binary(c) <- messages, do: c
+
+      assert "research: found 3 facts" in contents
+      assert "write: drafted summary" in contents
+
+      assert Enum.find_index(contents, &(&1 == "research: found 3 facts")) <
+               Enum.find_index(contents, &(&1 == "write: drafted summary"))
+    end
+
+    test "the ledger records the sequence of chosen workers" do
+      {:ok, llm} =
+        ScriptedLLM.start_link([
+          LLM.assistant("researcher"),
+          LLM.assistant("writer"),
+          LLM.assistant("DONE")
+        ])
+
+      graph = Orchestration.magentic({ScriptedLLM, llm}, workers(), [])
+
+      assert {:ok, %{ledger: %{chosen: chosen}}} =
+               ElGraph.invoke(graph, %{messages: [LLM.user("go")]})
+
+      assert [:researcher, :writer] == chosen
+    end
+
+    test "the stall guard forces termination when one worker is chosen repeatedly" do
+      # Orchestrator keeps picking :researcher forever — without a stall guard this
+      # would loop until max_steps. The guard must terminate before that.
+      {:ok, llm} =
+        ScriptedLLM.start_link(List.duplicate(LLM.assistant("researcher"), 50))
+
+      graph = Orchestration.magentic({ScriptedLLM, llm}, workers(), max_stalls: 2, max_steps: 25)
+
+      assert {:ok, %{ledger: %{chosen: chosen, stalls: stalls}}} =
+               ElGraph.invoke(graph, %{messages: [LLM.user("go")]})
+
+      # researcher chosen 3 times (initial + 2 repeats) before the guard fires,
+      # well short of max_steps — proves we did not loop to the step limit.
+      assert chosen == [:researcher, :researcher, :researcher]
+      assert stalls >= 2
+    end
+
+    test "accumulates usage across orchestrator turns" do
+      {:ok, llm} =
+        ScriptedLLM.start_link([LLM.assistant("researcher"), LLM.assistant("DONE")])
+
+      graph = Orchestration.magentic({ScriptedLLM, llm}, workers(), [])
+
+      assert {:ok, %{usage: %{input_tokens: _, output_tokens: _}}} =
+               ElGraph.invoke(graph, %{messages: [LLM.user("go")]})
+    end
+  end
 end

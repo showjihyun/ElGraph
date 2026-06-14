@@ -44,13 +44,13 @@
 상태: ✅ (mapping 7 tests + propagation 1)
 
 ## T2.5 — 오케스트레이션 템플릿 (`ElGraph.Orchestration`)
-시작 7.5 → 목표 9.5
+시작 7.5 → **달성 9.5**
 - [2] supervisor(오케스트레이터-워커) ✅
 - [2] group_chat(스피커 선택 정책) ✅
-- [ ] magentic(task-ledger 기반 동적 선택) 템플릿
-- [ ] 실 LLM 통합 테스트(@integration)
-- [ ] 핸드오프(버스 emit) 연동 + 문서
-상태: ⬜
+- [2] magentic(task-ledger + stall guard, 무한루프 방지) ✅
+- [2] 실 LLM 통합 테스트(@integration) ✅
+- [1.5] 핸드오프(버스 emit) 연동 문서(@moduledoc) ✅
+상태: ✅ (11 tests + integration)
 
 ## T2.6 — 고급 메모리 (`ElGraph.Memory`)
 시작 7.5 → 목표 9.5

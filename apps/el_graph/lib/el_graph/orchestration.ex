@@ -17,6 +17,25 @@ defmodule ElGraph.Orchestration do
       ]
       graph = ElGraph.Orchestration.supervisor(llm, workers, system: "...")
       ElGraph.invoke(graph, %{messages: [ElGraph.LLM.user("Write a report")]})
+
+  ## magentic (task-ledger)
+
+  `magentic/3` is `supervisor/3` plus a **task ledger** and a **stall guard**
+  (magentic-one pattern). The ledger (`:ledger` channel) records every worker the
+  orchestrator chooses; when the same worker is picked more than `:max_stalls`
+  times in a row the run is forced to terminate, defusing the classic
+  "agent loops forever" failure.
+
+  ## Cross-agent handoff
+
+  In both templates worker results flow back to the orchestrator purely via the
+  shared `:messages` channel — a worker appends its output and the orchestrator
+  reads the full transcript on its next turn. Direct, out-of-band handoff between
+  agents is also expressible without new orchestration code: have a worker emit on
+  the signal bus (`ElGraph.Skills.SignalReAct` `:emit`) and have the target worker
+  subscribe — the bus delivers the payload independently of the `:messages`
+  transcript. The orchestration templates here deliberately stick to `:messages`;
+  the signal bus is the escape hatch when you need agent-to-agent side-channels.
   """
 
   alias ElGraph.{LLM, LLMError, Reducers}
@@ -48,6 +67,46 @@ defmodule ElGraph.Orchestration do
       )
       |> ElGraph.state(:next, default: nil)
       |> ElGraph.add_node(:orchestrator, {__MODULE__, :orchestrate, [cfg]})
+      |> ElGraph.add_conditional_edge(:orchestrator, {__MODULE__, :route, []})
+
+    graph =
+      Enum.reduce(workers, graph, fn worker, g ->
+        g
+        |> ElGraph.add_node(worker.name, {__MODULE__, :run_worker, [worker]})
+        |> ElGraph.add_edge(worker.name, :orchestrator)
+      end)
+
+    ElGraph.compile(graph, entry: :orchestrator, max_steps: Keyword.get(opts, :max_steps, 25))
+  end
+
+  @doc """
+  magentic(task-ledger) 그래프를 빌드한다 — `supervisor/3` + 작업 원장 + 정체(stall) 가드.
+
+  오케스트레이터가 매 턴 다음 워커를 고르고, 선택을 원장(`:ledger.chosen`)에 기록한다.
+  동일 워커를 `:max_stalls`회를 **초과**해 연속 선택하면(기본 2) 강제 종료한다 —
+  "에이전트 무한 루프" 실패를 막는 결정적·테스트 가능한 가드다.
+
+  `opts`: `:system`(시스템 프롬프트 보강), `:max_stalls`(기본 2), `:max_steps`(기본 25).
+  """
+  @spec magentic({module(), term()}, [worker()], keyword()) :: ElGraph.Graph.t()
+  def magentic(llm, workers, opts \\ []) when is_list(workers) and workers != [] do
+    cfg = %{
+      llm: llm,
+      workers: workers,
+      system: Keyword.get(opts, :system),
+      max_stalls: Keyword.get(opts, :max_stalls, 2)
+    }
+
+    graph =
+      ElGraph.new()
+      |> ElGraph.state(:messages, default: [], reducer: {Reducers, :append, []})
+      |> ElGraph.state(:usage,
+        default: %{input_tokens: 0, output_tokens: 0},
+        reducer: {LLM, :add_usage, []}
+      )
+      |> ElGraph.state(:next, default: nil)
+      |> ElGraph.state(:ledger, default: %{chosen: [], stalls: 0})
+      |> ElGraph.add_node(:orchestrator, {__MODULE__, :magentic_orchestrate, [cfg]})
       |> ElGraph.add_conditional_edge(:orchestrator, {__MODULE__, :route, []})
 
     graph =
@@ -128,6 +187,47 @@ defmodule ElGraph.Orchestration do
 
       {:error, reason} ->
         raise LLMError, reason: reason
+    end
+  end
+
+  @doc false
+  def magentic_orchestrate(%{messages: messages, ledger: ledger}, _ctx, cfg) do
+    {mod, config} = cfg.llm
+    system = orchestrator_system(cfg.workers, cfg.system)
+
+    case mod.chat(config, messages, system: system) do
+      {:ok, %{message: message} = response} ->
+        choice = parse_choice(message[:content], cfg.workers)
+        {next, new_ledger} = apply_ledger(ledger, choice, cfg.max_stalls)
+
+        %{
+          messages: [message],
+          next: next,
+          ledger: new_ledger,
+          usage: Map.get(response, :usage)
+        }
+
+      {:error, reason} ->
+        raise LLMError, reason: reason
+    end
+  end
+
+  # 선택을 원장에 기록하고, 동일 워커 연속 선택이 max_stalls를 초과하면 강제 종료한다.
+  defp apply_ledger(ledger, @done, _max_stalls) do
+    {@done, ledger}
+  end
+
+  defp apply_ledger(%{chosen: chosen, stalls: stalls}, choice, max_stalls) do
+    # `stalls` counts consecutive repeats of the same worker (1 = chosen twice in a
+    # row, 2 = three times, ...). When it reaches `max_stalls` the run is forced to
+    # terminate before the worker is dispatched again.
+    stalls = if List.last(chosen) == choice, do: stalls + 1, else: 0
+    new_ledger = %{chosen: chosen ++ [choice], stalls: stalls}
+
+    if stalls >= max_stalls do
+      {@done, new_ledger}
+    else
+      {choice, new_ledger}
     end
   end
 
