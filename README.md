@@ -206,6 +206,7 @@ ElGraph.resume(graph, checkpointer: cp, thread_id: fork_id, resume: "거절")  #
 | [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) | 개발 환경 설정 (Windows/scoop) |
 | [`docs/TDD-SPEC.md`](docs/TDD-SPEC.md) | 테스트 규약 (TDD, 전부 async) |
 | [`docs/elixir-vs-python-comparison.md`](docs/elixir-vs-python-comparison.md) | LangGraph 대비 |
+| [`docs/ecosystem-review.md`](docs/ecosystem-review.md) | 생태계 검토 & 적용 제안 (Elixir/OSS 프레임워크 분석) |
 | [`docs/DOGFOODING.md`](docs/DOGFOODING.md) | 실사용 관찰 로그 |
 
 ---

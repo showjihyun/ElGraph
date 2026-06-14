@@ -212,6 +212,7 @@ See the full working example in [`examples/observed_agent`](examples/observed_ag
 | [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) | Dev environment setup (Windows/scoop) |
 | [`docs/TDD-SPEC.md`](docs/TDD-SPEC.md) | Testing conventions (TDD, all async) |
 | [`docs/elixir-vs-python-comparison.md`](docs/elixir-vs-python-comparison.md) | vs. LangGraph |
+| [`docs/ecosystem-review.md`](docs/ecosystem-review.md) | Ecosystem review & adoption proposals (Elixir/OSS framework analysis, in Korean) |
 | [`docs/DOGFOODING.md`](docs/DOGFOODING.md) | Real-usage observation log |
 
 ---
