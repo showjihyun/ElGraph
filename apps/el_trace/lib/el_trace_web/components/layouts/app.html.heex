@@ -1,0 +1,9 @@
+<main class="page">
+  <p :if={Phoenix.Flash.get(@flash, :info)} class="flash flash-info" role="alert">
+    <%= Phoenix.Flash.get(@flash, :info) %>
+  </p>
+  <p :if={Phoenix.Flash.get(@flash, :error)} class="flash flash-error" role="alert">
+    <%= Phoenix.Flash.get(@flash, :error) %>
+  </p>
+  <%= @inner_content %>
+</main>

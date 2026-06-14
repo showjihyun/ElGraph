@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "elixir-thinking": {
+      "source": "georgeguimaraes/claude-code-elixir",
+      "sourceType": "github",
+      "skillPath": "plugins/elixir/skills/elixir-thinking/SKILL.md",
+      "computedHash": "38db8db950163b8b7e0ef7895ec1c0586f8359b4b75c079216458108c848e393"
+    },
+    "otp-thinking": {
+      "source": "georgeguimaraes/claude-code-elixir",
+      "sourceType": "github",
+      "skillPath": "plugins/elixir/skills/otp-thinking/SKILL.md",
+      "computedHash": "5223cbc9e83f81261635935a7c0ccac36b82096dfb563a72226519487618bac8"
+    },
+    "using-elixir-skills": {
+      "source": "georgeguimaraes/claude-code-elixir",
+      "sourceType": "github",
+      "skillPath": "plugins/elixir/skills/using-elixir-skills/SKILL.md",
+      "computedHash": "1791db93e8c5bc1032466490472e00cc763f39f2fdeac00c9e44abdcbfb1d99b"
+    }
+  }
+}

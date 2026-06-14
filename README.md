@@ -1,0 +1,200 @@
+# ElGraph
+
+> **BEAM(Elixir/OTP) 위에서 도는 graph-first 에이전트 프레임워크.**
+> Python 의존성 없이 LangGraph의 내구 실행·HITL(사람 개입)·체크포인트를 제공하고,
+> 그 위에 실시간 관측 UI(ElTrace)까지 얹는다.
+
+LLM 에이전트를 **상태 채널 + 노드 + 엣지**로 선언하면, ElGraph가 체크포인트 기반으로
+실행한다. 중간에 멈춰 사람의 승인을 받고(HITL), crash가 나도 마지막 지점부터 재개하며,
+과거의 임의 시점으로 되감아 "다르게 가봤다면?"을 안전하게 탐색할 수 있다.
+
+```
+사용자 입력 ─▶ [graph 실행] ─▶ 체크포인트마다 저장
+                  │
+                  ├─ 인터럽트 → 사람이 승인/거절 → 재개
+                  └─ 과거 step에서 분기(fork) → if 시나리오 탐색
+```
+
+---
+
+## ✨ 핵심 특징
+
+- **그래프 코어** — 상태 채널/reducer, 조건부 엣지, 병렬 fan-out, 서브그래프. 런타임 의존성은 `:telemetry` 하나.
+- **내구 실행** — 체크포인트 저장 → 재개. 부분 실패한 병렬 단계도 성공한 작업을 보존해 LLM 중복 호출을 막는다.
+- **사람 개입(HITL)** — 노드 앞이나 노드 안에서 멈춰 사람의 답을 받고 그 지점부터 이어간다.
+- **time-travel** — 임의 과거 체크포인트에서 새 thread로 분기. 원본은 보존된다.
+- **에이전트 런타임** — GenServer 에이전트, 시그널 버스, ReAct 프리셋, LLM/MCP 어댑터, 비용 가드.
+- **실시간 관측 UI (ElTrace)** — thread 생애를 브라우저 타임라인으로 보고, 인터럽트에서 승인/거절·여기서 분기를 클릭으로.
+
+> 왜 Elixir인가? LangGraph가 Python에서 *라이브러리로 재구현*한 것들(내구 실행·병렬 격리·
+> 스트리밍 버스·분산 워커)이 BEAM에선 런타임 기본이다. 같은 기능을 더 적은 코드로, 더 강한 보장과 함께.
+> 상세: [`docs/elixir-vs-python-comparison.md`](docs/elixir-vs-python-comparison.md).
+
+---
+
+## 🚀 빠른 시작
+
+### 1. 준비물
+
+- **Elixir 1.18+** / **Erlang/OTP 27+** (개발은 Elixir 1.20 / OTP 28에서 검증)
+- 설치가 처음이라면 → [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) (Windows `scoop` 절차 포함)
+
+설치 확인:
+
+```bash
+elixir --version    # Elixir 1.18 이상이면 OK
+```
+
+### 2. 클론 + 의존성 + 테스트
+
+이 저장소는 **우산(umbrella) 프로젝트**다 — 루트에서 한 번에 두 앱을 다룬다.
+
+```bash
+git clone https://github.com/showjihyun/ElGraph.git
+cd ElGraph
+mix deps.get        # 의존성 설치
+mix test            # 전체 테스트 (전부 async) — 통과하면 환경 OK
+```
+
+> Windows에서 `mix`를 못 찾으면 PATH를 잡아준다(자세히는 ENVIRONMENT.md):
+> ```powershell
+> $env:Path = "$env:USERPROFILE\scoop\shims;$env:USERPROFILE\scoop\apps\elixir\current\bin;$env:Path"
+> ```
+
+### 3. 첫 그래프 30초 체험
+
+```bash
+iex -S mix
+```
+
+```elixir
+graph =
+  ElGraph.new()
+  |> ElGraph.state(:n, default: 0)
+  |> ElGraph.add_node(:double, fn %{n: n}, _ctx -> %{n: n * 2} end)
+  |> ElGraph.add_node(:inc, fn %{n: n}, _ctx -> %{n: n + 1} end)
+  |> ElGraph.add_edge(:double, :inc)
+  |> ElGraph.compile(entry: :double)
+
+ElGraph.invoke(graph, %{n: 10})
+#=> {:ok, %{n: 21}}
+```
+
+노드는 `(state, ctx)`를 받아 **상태 부분 업데이트 맵**을 돌려준다. 그게 전부다.
+
+### 4. 관측 UI 띄우기 (추천 — 가장 직관적)
+
+```bash
+cd apps/el_trace
+mix phx.server
+```
+
+브라우저에서 **http://localhost:4000** 을 열면, 승인 대기 중인 예제 thread가 보인다.
+타임라인을 실시간으로 따라가며 **승인/거절**하거나, 특정 step에서 **여기서 분기**해
+"거절했다면?" 시나리오를 새 thread로 만들어 볼 수 있다.
+
+> 브라우저 LiveView를 처음 띄울 땐 자바스크립트 자산을 한 번 빌드한다:
+> `mix esbuild el_trace` (또는 `mix phx.server`가 dev에서 자동 처리).
+
+---
+
+## 📦 프로젝트 구조
+
+```
+ElGraph/                  # 우산 루트 (여기서 mix test / mix format)
+├─ apps/
+│  ├─ el_graph/           # 코어 런타임 — 그래프·체크포인트·에이전트·LLM/MCP
+│  └─ el_trace/           # 관측 UI — Phoenix/LiveView (el_graph에 의존)
+├─ examples/
+│  └─ observed_agent/     # el_graph+el_trace를 "의존성으로 끌어다 쓰는" 예제
+├─ config/                # 공유 설정 (secrets.exs는 gitignore)
+└─ docs/                  # 설계 전문·환경·테스트 규약
+```
+
+- **`el_graph`** 만 쓰면 헤드리스(서버 없이) 에이전트 런타임이다.
+- **`el_trace`** 는 거기에 실시간 관측/개입 UI를 더한다. 범용 trace(span/토큰)는 Langfuse 같은
+  도구에 위임하고, ElGraph 체크포인트만이 아는 인과(인터럽트·thread 생애·time-travel)에 집중한다.
+
+---
+
+## 📖 조금 더 — 5분 투어
+
+### ReAct 에이전트 (한 줄 프리셋)
+
+```elixir
+llm = {ElGraph.LLM.OpenAI, api_key: System.fetch_env!("OPENAI_API_KEY")}
+graph = ElGraph.Presets.react(llm, [MyApp.SearchAction], budget: [tokens: 100_000])
+
+{:ok, %{messages: messages}} =
+  ElGraph.invoke(graph, %{messages: [ElGraph.LLM.user("엘릭서 검색해줘")]})
+```
+
+LLM이 툴을 호출하면 자동 실행 → 결과를 다시 모델에 넣는 루프가 돈다. 어댑터:
+`ElGraph.LLM.OpenAI` / `.Anthropic` / `.Gemini`, 테스트용 `ElGraph.Test.ScriptedLLM`.
+
+### 내구 실행 + 사람 승인(HITL)
+
+```elixir
+cp = {ElGraph.Checkpointer.ETS, ElGraph.Checkpointer.ETS.config(pid)}
+
+# 승인이 필요한 지점에서 멈춘다
+{:interrupted, %{node: :approve, payload: payload}} =
+  ElGraph.invoke(graph, input, checkpointer: cp, thread_id: "t1")
+
+# 사람의 답을 주입해 재개 — 멈춘 지점부터, 완료된 노드는 재실행하지 않는다
+{:ok, final} = ElGraph.resume(graph, checkpointer: cp, thread_id: "t1", resume: "approved")
+```
+
+### time-travel 분기 (ElTrace)
+
+```elixir
+ElTrace.observe("t1", graph, cp)                 # UI에 등록
+{:ok, fork_id, _} = ElTrace.fork("t1", 1, as: "t1-거절")   # step 1에서 분기
+ElGraph.resume(graph, checkpointer: cp, thread_id: fork_id, resume: "거절")  # 원본은 보존
+```
+
+전체 동작 예제는 [`examples/observed_agent`](examples/observed_agent) 참고.
+
+---
+
+## 📚 문서
+
+| 문서 | 내용 |
+|---|---|
+| [`docs/SPEC.md`](docs/SPEC.md) | 설계 전문, 마일스톤, 검토 이력 |
+| [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) | 개발 환경 설정 (Windows/scoop) |
+| [`docs/TDD-SPEC.md`](docs/TDD-SPEC.md) | 테스트 규약 (TDD, 전부 async) |
+| [`docs/elixir-vs-python-comparison.md`](docs/elixir-vs-python-comparison.md) | LangGraph 대비 |
+| [`docs/DOGFOODING.md`](docs/DOGFOODING.md) | 실사용 관찰 로그 |
+
+---
+
+## 🛠 개발
+
+```bash
+mix test                       # 전체 (el_graph + el_trace)
+mix test --only integration    # 실 API 호출 (config/secrets.exs 필요)
+mix format                     # 커밋 전 필수
+
+# 단일 앱 테스트는 해당 앱 디렉터리에서
+cd apps/el_trace && mix test test/el_trace/sessions_test.exs
+```
+
+규약: TDD(red → green → refactor), 전 테스트 `async: true`. 자세히는 [`docs/TDD-SPEC.md`](docs/TDD-SPEC.md).
+
+실 LLM 키가 필요하면 템플릿을 복사해 채운다 (커밋 금지 — gitignore됨):
+
+```bash
+cp config/secrets.example.exs config/secrets.exs
+```
+
+---
+
+## 상태
+
+M1(코어) ~ M5(멀티 에이전트/분산) 코어가 구현·검증됐고, 관측 트랙은 ElTrace LiveView
+(Timeline 시각화·승인/거절·여기서 분기)까지 동작한다. 마일스톤 상세는 [SPEC §8](docs/SPEC.md).
+
+## 라이선스
+
+[MIT](LICENSE)

@@ -1,0 +1,25 @@
+# Build artifacts
+/_build/
+/cover/
+/deps/
+/doc/
+
+# Secrets — API 키 등 (config/secrets.example.exs가 템플릿)
+/config/secrets.exs
+
+# 빌드된 자산 (esbuild 출력 — app.css는 소스로 커밋)
+/apps/el_trace/priv/static/assets/app.js
+/apps/el_trace/priv/static/assets/app.js.map
+
+# 브라우저 검증 산출물
+.playwright-mcp/
+
+# 예제 소비자 프로젝트의 독립 빌드 산출물
+/examples/*/_build/
+/examples/*/deps/
+
+# Misc
+erl_crash.dump
+*.ez
+el_graph-*.tar
+/tmp/
