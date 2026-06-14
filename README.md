@@ -1,5 +1,7 @@
 # ElGraph
 
+**한국어** | [English](README.en.md)
+
 > **BEAM(Elixir/OTP) 위에서 도는 graph-first 에이전트 프레임워크.**
 > Python 의존성 없이 LangGraph의 내구 실행·HITL(사람 개입)·체크포인트를 제공하고,
 > 그 위에 실시간 관측 UI(ElTrace)까지 얹는다.
