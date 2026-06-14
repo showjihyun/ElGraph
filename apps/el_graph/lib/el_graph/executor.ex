@@ -9,6 +9,11 @@ defmodule ElGraph.Executor do
   한 superstep에 여러 번 등장할 수 있어 노드 이름이 아닌 key로 구분한다.
   pending writes(SPEC §3.5)는 쓰기와 함께 제어 지시(goto/sends)도 보존해
   재개 시 라우팅까지 복원된다.
+
+  체크포인트 영속 시점은 `:durability` 모드로 조절한다 (SPEC §3.5):
+    * `:sync`  (기본) — 매 superstep 동기 영속. 강한 보장.
+    * `:async`        — 순서 보장 writer 프로세스에 비동기 적재, 반환 전 flush. 마지막 step 유실 가능.
+    * `:exit`         — 매 step 저장 생략, 완료·인터럽트만 영속. 가장 빠름(중간 크래시 복구 불가).
   """
 
   alias ElGraph.{Checkpoint, Ctx, Graph}
@@ -25,11 +30,13 @@ defmodule ElGraph.Executor do
     base = Keyword.get(opts, :initial_state)
 
     with_span(meta, fn ->
-      with {:ok, state} <- init_state(graph, input, base),
-           :ok <- save_checkpoint(meta, 0, state, entries),
-           :ok <- check_static_interrupt(meta, 0, state, entries) do
-        loop(graph, entries, state, 0, meta)
-      end
+      with_durability(meta, fn meta ->
+        with {:ok, state} <- init_state(graph, input, base),
+             :ok <- save_checkpoint(meta, 0, state, entries),
+             :ok <- check_static_interrupt(meta, 0, state, entries) do
+          loop(graph, entries, state, 0, meta)
+        end
+      end)
     end)
   end
 
@@ -56,7 +63,9 @@ defmodule ElGraph.Executor do
           entries = normalize_entries(checkpoint.next)
 
           with_span(meta, fn ->
-            loop(graph, entries, checkpoint.state, checkpoint.step, meta)
+            with_durability(meta, fn meta ->
+              loop(graph, entries, checkpoint.state, checkpoint.step, meta)
+            end)
           end)
         end
 
@@ -78,9 +87,11 @@ defmodule ElGraph.Executor do
     entries = normalize_entries(checkpoint.next)
 
     with_span(meta, fn ->
-      with :ok <- save_checkpoint(meta, checkpoint.step, checkpoint.state, checkpoint.next) do
-        loop(graph, entries, checkpoint.state, checkpoint.step, meta)
-      end
+      with_durability(meta, fn meta ->
+        with :ok <- save_checkpoint(meta, checkpoint.step, checkpoint.state, checkpoint.next) do
+          loop(graph, entries, checkpoint.state, checkpoint.step, meta)
+        end
+      end)
     end)
   end
 
@@ -116,9 +127,16 @@ defmodule ElGraph.Executor do
       interrupts: %{},
       interrupt_step: nil,
       cancel_flag: Keyword.get(opts, :cancel_flag),
-      introspect: Keyword.get(opts, :introspect)
+      introspect: Keyword.get(opts, :introspect),
+      durability: validate_durability(Keyword.get(opts, :durability, :sync)),
+      async_writer: nil
     }
   end
+
+  defp validate_durability(mode) when mode in [:sync, :async, :exit], do: mode
+
+  defp validate_durability(other),
+    do: raise(ArgumentError, ":durability must be :sync, :async, or :exit, got: #{inspect(other)}")
 
   defp with_span(meta, fun) do
     :telemetry.span([:el_graph, :invoke], %{thread_id: meta.thread_id}, fn ->
@@ -142,7 +160,10 @@ defmodule ElGraph.Executor do
     end)
   end
 
-  defp loop(_graph, [], state, _step, _meta), do: {:ok, state}
+  defp loop(_graph, [], state, step, meta) do
+    finalize(meta, step, state)
+    {:ok, state}
+  end
 
   defp loop(_graph, entries, state, step, %{max_steps: max_steps}) when step >= max_steps do
     {:error, {:max_steps_exceeded, %{steps: step, active: entries, state: state}}}
@@ -423,6 +444,9 @@ defmodule ElGraph.Executor do
         :ok
 
       hits ->
+        # 인터럽트 시점의 체크포인트는 재개를 위해 반드시 영속돼야 한다.
+        # :exit 모드는 매 step 저장을 건너뛰므로 여기서 강제 저장한다.
+        persist_for_interrupt(meta, step, state, next)
         {:interrupted, %{thread_id: meta.thread_id, step: step, before: hits, state: state}}
     end
   end
@@ -433,6 +457,10 @@ defmodule ElGraph.Executor do
 
   defp dynamic_interrupt(meta, node, payload, entries, state, step) do
     {mod, config} = meta.checkpointer
+
+    # :async 모드: 큐에 남은 쓰기를 먼저 비워야(flush) 이 인터럽트 체크포인트가
+    # 같은 step의 이전(비인터럽트) 쓰기에 덮이지 않는다. 인터럽트는 항상 동기 기록.
+    flush_writer(meta)
 
     :telemetry.execute(
       [:el_graph, :node, :interrupt],
@@ -461,13 +489,37 @@ defmodule ElGraph.Executor do
     end
   end
 
-  ## 체크포인트 연동 (checkpointer 미지정 시 전부 no-op)
+  ## 체크포인트 연동 (SPEC §3.5, durability 모드)
+  #
+  # save_checkpoint: 매 step 루틴 저장. :sync 동기 put, :async writer 적재, :exit 생략.
+  # finalize:        완료 시점. :exit만 최종 체크포인트를 강제 영속(나머지는 routine/flush가 처리).
+  # persist_for_interrupt: 인터럽트 시점. :exit만 강제 영속(나머지는 routine + flush가 보장).
 
   defp save_checkpoint(%{checkpointer: nil}, _step, _state, _next), do: :ok
+  defp save_checkpoint(%{durability: :exit}, _step, _state, _next), do: :ok
 
-  defp save_checkpoint(%{checkpointer: {mod, config}, thread_id: thread_id}, step, state, next) do
-    mod.put(config, %Checkpoint{thread_id: thread_id, step: step, state: state, next: next})
+  defp save_checkpoint(%{durability: :async} = meta, step, state, next) do
+    send(meta.async_writer, {:put, checkpoint(meta, step, state, next)})
+    :ok
   end
+
+  defp save_checkpoint(%{durability: :sync} = meta, step, state, next),
+    do: do_put(meta, step, state, next)
+
+  defp finalize(%{checkpointer: nil}, _step, _state), do: :ok
+  defp finalize(%{durability: :exit} = meta, step, state), do: do_put(meta, step, state, [])
+  defp finalize(_meta, _step, _state), do: :ok
+
+  defp persist_for_interrupt(%{durability: :exit} = meta, step, state, next),
+    do: do_put(meta, step, state, next)
+
+  defp persist_for_interrupt(_meta, _step, _state, _next), do: :ok
+
+  defp do_put(%{checkpointer: {mod, config}} = meta, step, state, next),
+    do: mod.put(config, checkpoint(meta, step, state, next))
+
+  defp checkpoint(%{thread_id: thread_id}, step, state, next),
+    do: %Checkpoint{thread_id: thread_id, step: step, state: state, next: next}
 
   defp pending_writes(%{checkpointer: nil}, _step), do: %{}
 
@@ -480,9 +532,62 @@ defmodule ElGraph.Executor do
   end
 
   defp persist_writes(%{checkpointer: nil}, _step, _writes), do: :ok
+  defp persist_writes(%{durability: :exit}, _step, _writes), do: :ok
 
-  defp persist_writes(%{checkpointer: {mod, config}, thread_id: thread_id}, step, writes),
-    do: mod.put_writes(config, thread_id, step, writes)
+  defp persist_writes(%{durability: :async} = meta, step, writes) do
+    send(meta.async_writer, {:put_writes, meta.thread_id, step, writes})
+    :ok
+  end
+
+  defp persist_writes(
+         %{durability: :sync, checkpointer: {mod, config}, thread_id: thread_id},
+         step,
+         writes
+       ),
+       do: mod.put_writes(config, thread_id, step, writes)
+
+  ## 비동기 writer (:async) — 순서 보장(FIFO 메일박스), 반환 전 flush, 정상 종료 시 stop.
+  # executor 프로세스에 link되어, executor가 죽으면 writer도 죽는다(진행 중 쓰기 유실은 async의 트레이드오프).
+
+  defp with_durability(%{durability: :async, checkpointer: {_mod, _config} = cp} = meta, fun) do
+    writer = spawn_link(fn -> writer_loop(cp) end)
+    meta = %{meta | async_writer: writer}
+    result = fun.(meta)
+    flush_writer(meta)
+    send(writer, :stop)
+    result
+  end
+
+  defp with_durability(meta, fun), do: fun.(meta)
+
+  defp flush_writer(%{durability: :async, async_writer: writer}) when is_pid(writer) do
+    send(writer, {:flush, self()})
+
+    receive do
+      {:flushed, ^writer} -> :ok
+    end
+  end
+
+  defp flush_writer(_meta), do: :ok
+
+  defp writer_loop({mod, config} = cp) do
+    receive do
+      {:put, checkpoint} ->
+        mod.put(config, checkpoint)
+        writer_loop(cp)
+
+      {:put_writes, thread_id, step, writes} ->
+        mod.put_writes(config, thread_id, step, writes)
+        writer_loop(cp)
+
+      {:flush, from} ->
+        send(from, {:flushed, self()})
+        writer_loop(cp)
+
+      :stop ->
+        :ok
+    end
+  end
 
   ## 쓰기 병합
 
