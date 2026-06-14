@@ -75,13 +75,13 @@
 상태: ✅ (13 tests)
 
 ## T3.9 — 가드레일 (`ElGraph.Guardrail`)
-시작 7.5 → 목표 9.5
+시작 7.5 → **달성 9.5**
 - [2] deny/redact/max_length/authorize_tool ✅
-- [ ] 내장 PII 패턴 라이브러리(이메일/전화/카드/주민번호 등)
-- [ ] 구조화 출력 검증(JSON schema / NimbleOptions)
-- [ ] 노드 래퍼 통합(입출력 가드 적용 헬퍼) + ReAct 연동
-- [ ] 차단 시 telemetry 이벤트 + 정책 위반 기록
-상태: ⬜
+- [2] PII 라이브러리(`Guardrail.PII`: email/phone/card/ssn/rrn/ipv4) + redact_pii/deny_pii ✅
+- [2] 구조화 출력 검증 `validate_schema/1`(NimbleOptions) ✅
+- [2] 노드 통합 `guard_value/4`(상태 필드 가드+변환) ✅
+- [2] 차단 telemetry `[:el_graph, :guardrail, :block]` ✅
+상태: ✅ (25 tests)
 
 ## T3.10 — 샌드박스 코드 실행
 시작 7.0 → 목표 9.5

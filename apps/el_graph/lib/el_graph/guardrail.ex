@@ -18,16 +18,29 @@ defmodule ElGraph.Guardrail do
 
   @type guard :: (term(), map() -> :ok | {:block, term()} | {:transform, term()})
 
+  alias ElGraph.Guardrail.PII
+
   @doc "가드를 순서대로 적용한다. 통과 시 `{:ok, value}`, 차단 시 `{:blocked, reason}`."
   @spec check([guard()], term(), map()) :: {:ok, term()} | {:blocked, term()}
   def check(guards, value, ctx \\ %{}) do
-    Enum.reduce_while(guards, {:ok, value}, fn guard, {:ok, value} ->
-      case guard.(value, ctx) do
-        :ok -> {:cont, {:ok, value}}
-        {:transform, new_value} -> {:cont, {:ok, new_value}}
-        {:block, reason} -> {:halt, {:blocked, reason}}
-      end
-    end)
+    result =
+      Enum.reduce_while(guards, {:ok, value}, fn guard, {:ok, value} ->
+        case guard.(value, ctx) do
+          :ok -> {:cont, {:ok, value}}
+          {:transform, new_value} -> {:cont, {:ok, new_value}}
+          {:block, reason} -> {:halt, {:blocked, reason}}
+        end
+      end)
+
+    case result do
+      {:blocked, reason} ->
+        :telemetry.execute([:el_graph, :guardrail, :block], %{count: 1}, %{reason: reason})
+
+      {:ok, _} ->
+        :ok
+    end
+
+    result
   end
 
   @doc "값이 패턴에 매치하면 차단한다 (PII/비밀 누출 등)."
@@ -63,4 +76,84 @@ defmodule ElGraph.Guardrail do
       if value in allowed, do: :ok, else: {:block, {:unauthorized_tool, value}}
     end
   end
+
+  @doc """
+  요청한 PII 타입을 마스킹하는 가드를 반환한다. `:all`은 모든 패턴이다.
+  치환 문자열 기본값은 `"[REDACTED]"`. 항상 통과하며 값만 바꾼다.
+  """
+  @spec redact_pii([atom()] | :all, String.t()) :: guard()
+  def redact_pii(types, replacement \\ "[REDACTED]") do
+    patterns = pii_patterns(types)
+
+    fn value, _ctx ->
+      if is_binary(value) do
+        redacted =
+          Enum.reduce(patterns, value, fn {_type, regex}, acc ->
+            Regex.replace(regex, acc, replacement)
+          end)
+
+        {:transform, redacted}
+      else
+        :ok
+      end
+    end
+  end
+
+  @doc """
+  요청한 PII 타입이 하나라도 있으면 `{:block, {:pii, type}}`로 차단한다. `:all`은 모든 패턴.
+  """
+  @spec deny_pii([atom()] | :all) :: guard()
+  def deny_pii(types) do
+    patterns = pii_patterns(types)
+
+    fn value, _ctx ->
+      if is_binary(value) do
+        case Enum.find(patterns, fn {_type, regex} -> Regex.match?(regex, value) end) do
+          {type, _regex} -> {:block, {:pii, type}}
+          nil -> :ok
+        end
+      else
+        :ok
+      end
+    end
+  end
+
+  @doc """
+  값(keyword 또는 map)을 NimbleOptions 스키마로 검증한다. 유효하면 `:ok`,
+  아니면 `{:block, {:invalid_output, reason}}`. keyword 스키마는 컴파일해서 받는다.
+  """
+  @spec validate_schema(NimbleOptions.t() | keyword()) :: guard()
+  def validate_schema(%NimbleOptions{} = schema) do
+    fn value, _ctx ->
+      keyword = if is_map(value), do: Map.to_list(value), else: value
+
+      case NimbleOptions.validate(keyword, schema) do
+        {:ok, _validated} -> :ok
+        {:error, %NimbleOptions.ValidationError{} = error} -> {:block, {:invalid_output, error}}
+      end
+    end
+  end
+
+  def validate_schema(schema) when is_list(schema) do
+    validate_schema(NimbleOptions.new!(schema))
+  end
+
+  @doc """
+  상태 맵의 `key` 필드를 가드로 검사한다. 통과 시 변환된 값을 다시 넣은 상태를
+  `{:ok, state}`로, 차단 시 `{:blocked, reason}`을 반환한다 — 노드의 입출력 가딩 진입점.
+  """
+  @spec guard_value(map(), atom(), [guard()], keyword()) :: {:ok, map()} | {:blocked, term()}
+  def guard_value(state, key, guards, opts \\ []) do
+    ctx = Keyword.get(opts, :ctx, %{})
+
+    case check(guards, Map.get(state, key), ctx) do
+      {:ok, transformed} -> {:ok, Map.put(state, key, transformed)}
+      {:blocked, reason} -> {:blocked, reason}
+    end
+  end
+
+  defp pii_patterns(:all), do: PII.patterns()
+
+  defp pii_patterns(types) when is_list(types),
+    do: Map.new(types, fn type -> {type, PII.pattern(type)} end)
 end
