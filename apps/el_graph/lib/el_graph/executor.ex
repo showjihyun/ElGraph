@@ -136,7 +136,8 @@ defmodule ElGraph.Executor do
   defp validate_durability(mode) when mode in [:sync, :async, :exit], do: mode
 
   defp validate_durability(other),
-    do: raise(ArgumentError, ":durability must be :sync, :async, or :exit, got: #{inspect(other)}")
+    do:
+      raise(ArgumentError, ":durability must be :sync, :async, or :exit, got: #{inspect(other)}")
 
   defp with_span(meta, fun) do
     :telemetry.span([:el_graph, :invoke], %{thread_id: meta.thread_id}, fn ->
@@ -259,9 +260,17 @@ defmodule ElGraph.Executor do
     do: [{entry, exec_node(graph, entry, state, step, meta)}]
 
   defp exec_all(graph, entries, state, step, meta) do
+    # 병렬 노드는 별도 Task에서 돈다 — OTel 컨텍스트는 프로세스 로컬이라 자동 전파되지 않는다.
+    # 부모(실행기 프로세스)의 컨텍스트를 캡처해 각 Task에서 attach하면 노드 span이 invoke
+    # span 아래로 중첩된다 (OTel 미사용 시 빈 컨텍스트라 무비용·무해, 트렌드 보고서 Tier 1.4).
+    otel_ctx = OpenTelemetry.Ctx.get_current()
+
     entries
     |> Task.async_stream(
-      fn entry -> {entry, exec_node(graph, entry, state, step, meta)} end,
+      fn entry ->
+        OpenTelemetry.Ctx.attach(otel_ctx)
+        {entry, exec_node(graph, entry, state, step, meta)}
+      end,
       ordered: true,
       timeout: :infinity
     )
