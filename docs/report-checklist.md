@@ -1,0 +1,98 @@
+# Agentic AI 2026 보고서 실행 체크리스트
+
+`docs/agentic-ai-2026-report.html`의 Tier 1/2/3 권고 기능을 **완성도 9.5/10 목표**로 심화한다.
+각 항목: 계획 → 실행(TDD) → 테스트. 점수 루브릭 = 5개 기준 × 2점 = 10점.
+
+진행 표기: ⬜ 대기 · 🔵 진행 · ✅ 완료(≥9.5)
+
+---
+
+## T1.1 — AG-UI 매핑 (`ElGraph.AGUI`)
+시작 8.0 → 목표 9.5
+- [2] 핵심 이벤트(RUN/STEP/TEXT_MESSAGE/TOOL_CALL/STATE_SNAPSHOT) 매핑 ✅
+- [2] 토큰 메시지 프레이밍(노드 단위 start/content/end) ✅
+- [ ] 누락 이벤트: STATE_DELTA(JSON-Patch), MESSAGES_SNAPSHOT, CUSTOM, STEP 오류
+- [ ] `encode/1` 단건 매핑 + AG-UI 스키마 준수(필드명/필수값) 검증 테스트
+- [ ] 엣지케이스: 중첩 인터럽트, 빈 스트림, 도구 호출 중 텍스트 혼재
+상태: 🔵
+
+## T1.2 — LLM SSE 스트리밍 (4 어댑터)
+시작 8.0 → 목표 9.5
+- [2] behaviour stream_chat/3 + SSE 파서 + 4 어댑터 ✅
+- [2] 텍스트 토큰 실시간 방출 + 누적 응답 ✅
+- [ ] 도구 호출 델타 스트리밍(TOOL_CALL_* on_delta 이벤트)
+- [ ] 에러/중단(스트림 도중 실패) 처리 + 테스트
+- [ ] ReAct 프리셋/노드 레벨 스트리밍 통합 헬퍼
+상태: ⬜
+
+## T1.3 — A2A + AG-UI HTTP 서버 (`el_graph_web`)
+시작 7.0 → 목표 9.5
+- [2] Plug 라우터 + Agent Card + invoke + AG-UI SSE ✅
+- [ ] A2A JSON-RPC 2.0 준수(message/send, message/stream, tasks/get)
+- [ ] A2A SSE 스트리밍 엔드포인트(message/stream)
+- [ ] `.well-known/agent.json` 표준 경로 + 에러 응답 규약
+- [ ] 라이브 서버 통합 테스트(Bandit 기동 + 실제 HTTP)
+상태: ⬜
+
+## T1.4 — OTel 병렬 컨텍스트 전파
+시작 8.5 → 목표 9.5
+- [2] exec_all 부모 컨텍스트 캡처+attach ✅
+- [2] async-safe 전파 테스트 ✅
+- [ ] SDK 기반 span 중첩 검증(test exporter, isolated)
+- [ ] Mapping semconv 확장: agent invoke / bus / checkpoint span
+- [ ] checkpoint 저장 telemetry 이벤트 계측
+상태: ⬜
+
+## T2.5 — 오케스트레이션 템플릿 (`ElGraph.Orchestration`)
+시작 7.5 → 목표 9.5
+- [2] supervisor(오케스트레이터-워커) ✅
+- [2] group_chat(스피커 선택 정책) ✅
+- [ ] magentic(task-ledger 기반 동적 선택) 템플릿
+- [ ] 실 LLM 통합 테스트(@integration)
+- [ ] 핸드오프(버스 emit) 연동 + 문서
+상태: ⬜
+
+## T2.6 — 고급 메모리 (`ElGraph.Memory`)
+시작 7.5 → 목표 9.5
+- [2] 3-스코프(episodic/semantic/procedural) + 시점진실 ✅
+- [ ] 시맨틱 검색 훅(임베딩 behaviour + recall_relevant)
+- [ ] SummarizeNode/Store 축출 연동
+- [ ] 충돌/만료(TTL, supersede 이력) 처리
+- [ ] 계약 테스트(어댑터 무관 동작)
+상태: ⬜
+
+## T2.7 — 내구 실행 + Postgres/Redis 체크포인터
+**외부 작업자 완료** (el_graph_ecto/el_graph_redis/DETS/Mnesia 커밋됨). 내 심화 대상 아님. 점수 N/A.
+상태: ✅(외부)
+
+## T3.8 — Evals (`ElGraph.Eval`)
+시작 7.5 → 목표 9.5
+- [2] 데이터셋 평가 + 플러그형 스코어러 + LLM-judge ✅
+- [ ] 체크포인트-리플레이 기반 평가(분기 시나리오)
+- [ ] 병렬 평가(SubAgent/Task) + 집계 메트릭(p50/통과율/점수분포)
+- [ ] 데이터셋 로딩(JSONL) + 케이스 ID/태그
+- [ ] 회귀 비교(baseline 대비 delta)
+상태: ⬜
+
+## T3.9 — 가드레일 (`ElGraph.Guardrail`)
+시작 7.5 → 목표 9.5
+- [2] deny/redact/max_length/authorize_tool ✅
+- [ ] 내장 PII 패턴 라이브러리(이메일/전화/카드/주민번호 등)
+- [ ] 구조화 출력 검증(JSON schema / NimbleOptions)
+- [ ] 노드 래퍼 통합(입출력 가드 적용 헬퍼) + ReAct 연동
+- [ ] 차단 시 telemetry 이벤트 + 정책 위반 기록
+상태: ⬜
+
+## T3.10 — 샌드박스 코드 실행
+시작 7.0 → 목표 9.5
+- [2] Sandbox behaviour + Command 어댑터 + CodeExec Action ✅
+- [ ] 타임아웃/리소스 제한 강제(프로세스 kill)
+- [ ] Docker/컨테이너 백엔드 어댑터
+- [ ] 출력 크기 제한 + 안전 기본값(네트워크/FS 차단 문서)
+- [ ] 통합 테스트(실제 인터프리터, @integration)
+상태: ⬜
+
+---
+
+## 진행 로그
+(작업하며 각 항목 점수/상태 갱신)
