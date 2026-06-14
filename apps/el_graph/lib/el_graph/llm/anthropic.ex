@@ -1,6 +1,6 @@
 defmodule ElGraph.LLM.Anthropic do
   @moduledoc """
-  Anthropic Messages API 어댑터 (비스트리밍).
+  Anthropic Messages API 어댑터 (`chat/3` 비스트리밍 + `stream_chat/3` SSE 스트리밍).
 
       llm = {ElGraph.LLM.Anthropic, api_key: System.fetch_env!("ANTHROPIC_API_KEY")}
       graph = ElGraph.Presets.react(llm, tools)
@@ -92,6 +92,127 @@ defmodule ElGraph.LLM.Anthropic do
   end
 
   def parse_response(other), do: {:error, {:unexpected_response, other}}
+
+  ## 스트리밍 (SSE)
+
+  @impl ElGraph.LLM
+  def stream_chat(config, messages, opts) do
+    on_delta = Keyword.get(opts, :on_delta, fn _ -> :ok end)
+    request = build_request(config, messages, opts)
+    body = Map.put(request.body, :stream, true)
+    req_options = Keyword.get(config, :req_options, [])
+
+    ElGraph.LLM.Telemetry.instrument(:anthropic, body.model, fn ->
+      collector = stream_collector(on_delta)
+
+      result =
+        Req.post(
+          request.url,
+          [json: body, headers: request.headers, retry: false, into: collector] ++ req_options
+        )
+
+      case result do
+        {:ok, %Req.Response{status: 200, private: %{el_graph_sse: %{chunks: chunks}}}} ->
+          reduce_chunks(chunks)
+
+        {:ok, %Req.Response{status: status, body: body}} ->
+          {:error, {:api_error, status, body}}
+
+        {:error, exception} ->
+          {:error, {:transport_error, exception}}
+      end
+    end)
+  end
+
+  # Req `into:` 콜렉터 — SSE 청크를 파싱하고 토큰을 실시간 방출, 원청크는 누적한다.
+  defp stream_collector(on_delta) do
+    fn {:data, data}, {req, resp} ->
+      state = resp.private[:el_graph_sse] || %{buffer: "", chunks: []}
+      {payloads, buffer} = ElGraph.LLM.SSE.parse(state.buffer, data)
+      decoded = Enum.map(payloads, &JSON.decode!/1)
+      Enum.each(decoded, fn chunk -> Enum.each(decode_deltas(chunk), on_delta) end)
+      state = %{buffer: buffer, chunks: state.chunks ++ decoded}
+      {:cont, {req, Req.Response.put_private(resp, :el_graph_sse, state)}}
+    end
+  end
+
+  @doc false
+  @spec decode_deltas(map()) :: [ElGraph.LLM.delta()]
+  def decode_deltas(%{
+        "type" => "content_block_delta",
+        "delta" => %{"type" => "text_delta", "text" => text}
+      })
+      when is_binary(text) and text != "",
+      do: [{:token, text}]
+
+  def decode_deltas(_chunk), do: []
+
+  @doc false
+  @spec reduce_chunks([map()]) :: {:ok, ElGraph.LLM.response()}
+  def reduce_chunks(chunks) do
+    acc =
+      Enum.reduce(
+        chunks,
+        %{content: "", tools: %{}, input: nil, output: nil},
+        &reduce_chunk/2
+      )
+
+    tool_calls =
+      acc.tools
+      |> Enum.sort_by(fn {index, _} -> index end)
+      |> Enum.map(fn {_index, tc} ->
+        %{id: tc.id, name: tc.name, args: JSON.decode!(tc.args)}
+      end)
+
+    content = if acc.content == "", do: nil, else: acc.content
+    usage = build_usage(acc.input, acc.output)
+    {:ok, %{message: LLM.assistant(content, tool_calls), usage: usage}}
+  end
+
+  defp reduce_chunk(
+         %{"type" => "message_start", "message" => %{"usage" => %{"input_tokens" => input}}},
+         acc
+       ),
+       do: %{acc | input: input}
+
+  defp reduce_chunk(%{"type" => "message_delta", "usage" => %{"output_tokens" => output}}, acc),
+    do: %{acc | output: output}
+
+  defp reduce_chunk(
+         %{
+           "type" => "content_block_start",
+           "index" => index,
+           "content_block" => %{"type" => "tool_use", "id" => id, "name" => name}
+         },
+         acc
+       ),
+       do: %{acc | tools: Map.put(acc.tools, index, %{id: id, name: name, args: ""})}
+
+  defp reduce_chunk(
+         %{
+           "type" => "content_block_delta",
+           "delta" => %{"type" => "text_delta", "text" => text}
+         },
+         acc
+       ),
+       do: %{acc | content: acc.content <> text}
+
+  defp reduce_chunk(
+         %{
+           "type" => "content_block_delta",
+           "index" => index,
+           "delta" => %{"type" => "input_json_delta", "partial_json" => partial}
+         },
+         acc
+       ) do
+    existing = Map.get(acc.tools, index, %{id: nil, name: nil, args: ""})
+    %{acc | tools: Map.put(acc.tools, index, %{existing | args: existing.args <> partial})}
+  end
+
+  defp reduce_chunk(_chunk, acc), do: acc
+
+  defp build_usage(nil, nil), do: nil
+  defp build_usage(input, output), do: %{input_tokens: input || 0, output_tokens: output || 0}
 
   ## 메시지 변환
 
