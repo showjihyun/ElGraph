@@ -84,13 +84,13 @@
 상태: ✅ (25 tests)
 
 ## T3.10 — 샌드박스 코드 실행
-시작 7.0 → 목표 9.5
+시작 7.0 → **달성 9.5**
 - [2] Sandbox behaviour + Command 어댑터 + CodeExec Action ✅
-- [ ] 타임아웃/리소스 제한 강제(프로세스 kill)
-- [ ] Docker/컨테이너 백엔드 어댑터
-- [ ] 출력 크기 제한 + 안전 기본값(네트워크/FS 차단 문서)
-- [ ] 통합 테스트(실제 인터프리터, @integration)
-상태: ⬜
+- [2] 타임아웃 강제(Task.shutdown, run_with_timeout 공용) + 출력 크기 제한(truncated) ✅
+- [2] Docker 백엔드(`Sandbox.Docker`: --network=none/--read-only/메모리·CPU 제한 기본값) ✅
+- [1.5] 안전 기본값 문서(Command=격리없음·컨테이너 필수, Docker=하드격리) ✅
+- [2] 실 인터프리터 통합 테스트(@integration, elixir 실행) ✅
+상태: ✅ (16 tests + integration)
 
 ---
 

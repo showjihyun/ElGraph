@@ -3,10 +3,25 @@ defmodule ElGraph.Sandbox.Command do
   외부 인터프리터에 위임하는 `ElGraph.Sandbox` 어댑터.
 
   실제 격리는 호스트가 책임진다 — 이 어댑터는 컨테이너/제한된 사용자/마이크로VM 안에서
-  구동될 것을 전제로 인터프리터 프로세스를 띄울 뿐, 자체적으로 격리를 보장하지 않는다.
+  구동될 것을 전제로 인터프리터 프로세스를 띄울 뿐, **자체적으로 격리를 보장하지 않는다**
+  (네트워크/파일시스템/리소스 제한 없음). 하드 격리가 필요하면 `ElGraph.Sandbox.Docker`를
+  사용한다.
+
   `:runner`(테스트 주입용, 기본 `System.cmd`)로 실행을 가로챌 수 있다.
 
   지원 언어: `"elixir"`, `"python"`, `"node"`, `"ruby"`, `"bash"`.
+
+  ## 옵션
+
+    * `:language` — 인터프리터 선택 (기본 `"elixir"`).
+    * `:timeout` — 실행 제한(ms, 기본 `:infinity`). 초과 시 `{:error, :timeout}`.
+      러너를 `Task` 안에서 돌리고 초과 시 `Task.shutdown(task, :brutal_kill)`로 정리한다.
+      **주의(best-effort):** 기본 `System.cmd` 러너에서 Task를 죽여도 이미 떠 있는 OS
+      서브프로세스는 BEAM이 best-effort로만 정리한다. 하드 격리(서브프로세스 강제 종료
+      포함)가 필요하면 `ElGraph.Sandbox.Docker`(컨테이너 단위 정리)를 쓴다.
+    * `:max_output` — stdout 최대 바이트(기본 `:infinity`). 초과하면 잘라내고
+      `truncated: true`를 반환한다. 자르지 않으면 `truncated: false`.
+    * `:runner` — `(cmd, args, opts) -> {output, exit_code}` (기본 `System.cmd/3`).
   """
 
   @behaviour ElGraph.Sandbox
@@ -24,17 +39,34 @@ defmodule ElGraph.Sandbox.Command do
     language = opts[:language] || "elixir"
 
     case Map.fetch(@interpreters, language) do
-      {:ok, {cmd, flag}} -> exec(cmd, flag, code, opts)
+      {:ok, {cmd, flag}} -> exec(cmd, [flag, code], opts)
       :error -> {:error, {:unsupported_language, language}}
     end
   end
 
-  defp exec(cmd, flag, code, opts) do
+  defp exec(cmd, args, opts) do
     runner = opts[:runner] || (&default_runner/3)
 
-    case runner.(cmd, [flag, code], stderr_to_stdout: true) do
-      {output, 0} -> {:ok, %{stdout: output, exit_code: 0}}
-      {output, code} -> {:error, {:exit, code, output}}
+    case ElGraph.Sandbox.run_with_timeout(runner, cmd, args, opts) do
+      {:ok, {output, 0}} -> {:ok, build_result(output, 0, opts)}
+      {:ok, {output, code}} -> {:error, {:exit, code, output}}
+      {:error, :timeout} -> {:error, :timeout}
+    end
+  end
+
+  defp build_result(output, code, opts) do
+    case opts[:max_output] do
+      nil ->
+        %{stdout: output, exit_code: code, truncated: false}
+
+      :infinity ->
+        %{stdout: output, exit_code: code, truncated: false}
+
+      max when byte_size(output) > max ->
+        %{stdout: binary_part(output, 0, max), exit_code: code, truncated: true}
+
+      _max ->
+        %{stdout: output, exit_code: code, truncated: false}
     end
   end
 

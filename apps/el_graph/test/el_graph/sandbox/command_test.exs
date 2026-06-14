@@ -37,4 +37,45 @@ defmodule ElGraph.Sandbox.CommandTest do
       assert_received {:ran, "python", ["-c", "print('hi')"]}
     end
   end
+
+  describe "run/2 — timeout (:timeout opt)" do
+    test "returns {:error, :timeout} when the runner exceeds the timeout" do
+      runner = fn _, _, _ -> Process.sleep(:infinity) end
+
+      assert {:error, :timeout} =
+               Command.run("loop", language: "elixir", runner: runner, timeout: 50)
+    end
+
+    test "completes normally when the runner finishes within the timeout" do
+      runner = fn _, _, _ -> {"ok\n", 0} end
+
+      assert {:ok, %{stdout: "ok\n", exit_code: 0, truncated: false}} =
+               Command.run("fast", language: "elixir", runner: runner, timeout: 1000)
+    end
+  end
+
+  describe "run/2 — output-size limit (:max_output opt)" do
+    test "truncates stdout to :max_output bytes and flags truncated: true" do
+      runner = fn _, _, _ -> {String.duplicate("x", 100), 0} end
+
+      assert {:ok, %{stdout: out, exit_code: 0, truncated: true}} =
+               Command.run("big", language: "elixir", runner: runner, max_output: 10)
+
+      assert out == String.duplicate("x", 10)
+    end
+
+    test "leaves short output intact and flags truncated: false" do
+      runner = fn _, _, _ -> {"short\n", 0} end
+
+      assert {:ok, %{stdout: "short\n", exit_code: 0, truncated: false}} =
+               Command.run("small", language: "elixir", runner: runner, max_output: 1000)
+    end
+
+    test "flags truncated: false when no :max_output is given" do
+      runner = fn _, _, _ -> {"hello\n", 0} end
+
+      assert {:ok, %{stdout: "hello\n", exit_code: 0, truncated: false}} =
+               Command.run("hi", language: "elixir", runner: runner)
+    end
+  end
 end
