@@ -5,7 +5,7 @@
 
 상태: v0.9 (설계 검토 R1~R5 반영, M1~M4 완료 · M5 코어 완료) · 2026-06-13
 
-**구현 현황 요약**: 테스트 240개(el_graph 213 + el_trace 27) + 통합 3개(실 OpenAI), 전부 `async: true`. 코어(L1) 런타임
+**구현 현황 요약**: 테스트 455개(el_graph 400 + el_graph_web 28 + el_trace 27) + 통합 다수(실 OpenAI 등), 전부 `async: true`. 코어(L1) 런타임
 의존성 `:telemetry` 1개. 실 OpenAI로 도는 문서 Q&A 에이전트, 센서→버스→에이전트 체인,
 2-에이전트 파이프라인이 동작 검증됨. 구현 로드맵·완료 기준은 §8, 실사용 관찰은 `DOGFOODING.md`.
 
