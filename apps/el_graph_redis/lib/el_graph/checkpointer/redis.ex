@@ -23,17 +23,22 @@ defmodule ElGraph.Checkpointer.Redis do
   alias ElGraph.Checkpoint
 
   @doc """
-  어댑터 config — Redix 연결과 키 prefix를 지정한다.
+  어댑터 config — Redix 연결, 키 prefix, 보존정책을 지정한다.
 
       ElGraph.Checkpointer.Redis.config(:el_graph_redix, prefix: "myapp")
+      ElGraph.Checkpointer.Redis.config(:el_graph_redix, keep: {:last, 50})
   """
   @spec config(GenServer.server(), keyword()) :: map()
   def config(conn, opts \\ []) do
-    %{conn: conn, prefix: Keyword.get(opts, :prefix, "el_graph")}
+    %{
+      conn: conn,
+      prefix: Keyword.get(opts, :prefix, "el_graph"),
+      keep: Keyword.get(opts, :keep, :all)
+    }
   end
 
   @impl true
-  def put(%{conn: conn, prefix: p}, %Checkpoint{} = checkpoint) do
+  def put(%{conn: conn, prefix: p} = config, %Checkpoint{} = checkpoint) do
     with :ok <- Checkpoint.validate_serializable(checkpoint.state) do
       {:ok, _} =
         Redix.pipeline(conn, [
@@ -50,6 +55,7 @@ defmodule ElGraph.Checkpointer.Redis do
           ]
         ])
 
+      prune(config, checkpoint.thread_id)
       :ok
     end
   end
@@ -109,6 +115,30 @@ defmodule ElGraph.Checkpointer.Redis do
       {:ok, nil} -> :not_found
       {:ok, data} -> {:ok, :erlang.binary_to_term(data)}
     end
+  end
+
+  # 보존 정책 (SPEC §3.5): {:last, n}이면 thread별 최근 n개 step만 남기고 오래된
+  # 체크포인트/pending writes 키와 인덱스 멤버를 정리한다.
+  defp prune(%{keep: :all}, _thread_id), do: :ok
+
+  defp prune(%{conn: conn, prefix: p, keep: {:last, n}}, thread_id) do
+    {:ok, members} = Redix.command(conn, ["ZRANGE", idx_key(p, thread_id), "0", "-1"])
+    old = Enum.drop(members, -n)
+
+    if old != [] do
+      del_keys =
+        Enum.flat_map(old, fn step_str ->
+          step = String.to_integer(step_str)
+          [cp_key(p, thread_id, step), wr_key(p, thread_id, step)]
+        end)
+
+      Redix.pipeline(conn, [
+        ["DEL" | del_keys],
+        ["ZREM", idx_key(p, thread_id) | old]
+      ])
+    end
+
+    :ok
   end
 
   defp cp_key(p, thread_id, step), do: "#{p}:cp:#{thread_id}:#{step}"

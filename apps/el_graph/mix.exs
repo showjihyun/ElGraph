@@ -18,7 +18,8 @@ defmodule ElGraph.MixProject do
 
   def application do
     [
-      extra_applications: [:logger]
+      # :mnesia — BEAM 내장(외부 의존성 아님). Checkpointer.Mnesia 어댑터용.
+      extra_applications: [:logger, :mnesia]
     ]
   end
 

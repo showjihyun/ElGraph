@@ -22,7 +22,7 @@ LLM 에이전트를 **상태 채널 + 노드 + 엣지**로 선언하면, ElGraph
 ## ✨ 핵심 특징
 
 - **그래프 코어** — 상태 채널/reducer, 조건부 엣지, 병렬 fan-out, 서브그래프. 런타임 의존성은 `:telemetry` 하나.
-- **내구 실행** — 체크포인트 저장 → 재개. 부분 실패한 병렬 단계도 성공한 작업을 보존해 LLM 중복 호출을 막는다. 백엔드 교체 가능: **ETS**(기본·인메모리) · **Postgres** · **Valkey/Redis**.
+- **내구 실행** — 체크포인트 저장 → 재개. 부분 실패한 병렬 단계도 성공한 작업을 보존해 LLM 중복 호출을 막는다. 백엔드 교체 가능: **ETS**(인메모리) · **DETS·Mnesia**(BEAM 내장·무인프라 디스크 영속) · **Postgres** · **Valkey/Redis**. 전부 `keep: {:last, n}` 보존정책 지원.
 - **사람 개입(HITL)** — 노드 앞이나 노드 안에서 멈춰 사람의 답을 받고 그 지점부터 이어간다.
 - **time-travel** — 임의 과거 체크포인트에서 새 thread로 분기. 원본은 보존된다.
 - **에이전트 런타임** — GenServer 에이전트, 시그널 버스, ReAct 프리셋, LLM/MCP 어댑터, 비용 가드.
@@ -156,16 +156,20 @@ ElGraph/                  # 우산 루트 (여기서 mix test / mix format)
 ```
 
 내구 체크포인터는 코어의 `ElGraph.Checkpointer` behaviour를 구현한 **교체 가능한 어댑터**다.
-ETS는 인메모리(빠르지만 재시작 시 소실), Postgres/Valkey는 재시작·노드 교체를 넘어 thread를 재개한다:
+ETS는 인메모리(빠르지만 재시작 시 소실), 나머지는 재시작·노드 교체를 넘어 thread를 재개한다:
 
 ```elixir
-# Postgres
+# BEAM 내장 — 외부 인프라 0 (코어 el_graph에 포함)
+cp = {ElGraph.Checkpointer.Dets,   ElGraph.Checkpointer.Dets.config(pid)}    # 단일 파일
+cp = {ElGraph.Checkpointer.Mnesia, ElGraph.Checkpointer.Mnesia.config(pid)}  # 분산 가능(disc_copies)
+# 외부 DB (선택적 형제 앱)
 cp = {ElGraph.Checkpointer.Postgres, ElGraph.Checkpointer.Postgres.config(MyApp.Repo)}
-# Valkey/Redis
-cp = {ElGraph.Checkpointer.Redis, ElGraph.Checkpointer.Redis.config(:my_redix)}
+cp = {ElGraph.Checkpointer.Redis,    ElGraph.Checkpointer.Redis.config(:my_redix)}
 
 ElGraph.invoke(graph, input, checkpointer: cp, thread_id: "t1")
 ```
+
+Postgres는 마이그레이션이 필요하다: `mix el_graph.ecto.gen.migration -r MyApp.Repo` → `mix ecto.migrate`.
 
 - **`el_graph`** 만 쓰면 헤드리스(서버 없이) 에이전트 런타임이다.
 - **`el_trace`** 는 거기에 실시간 관측/개입 UI를 더한다. 범용 trace(span/토큰)는 Langfuse 같은

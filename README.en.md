@@ -22,7 +22,7 @@ user input ─▶ [run graph] ─▶ checkpoint after every step
 ## ✨ Highlights
 
 - **Graph core** — state channels/reducers, conditional edges, parallel fan-out, subgraphs. Only one runtime dependency: `:telemetry`.
-- **Durable execution** — checkpoint → resume. A partially failed parallel step preserves the work that succeeded, avoiding duplicate LLM calls. Swappable backends: **ETS** (default, in-memory) · **Postgres** · **Valkey/Redis**.
+- **Durable execution** — checkpoint → resume. A partially failed parallel step preserves the work that succeeded, avoiding duplicate LLM calls. Swappable backends: **ETS** (in-memory) · **DETS·Mnesia** (BEAM built-in, zero-infra disk persistence) · **Postgres** · **Valkey/Redis** — all support `keep: {:last, n}` retention.
 - **Human-in-the-loop (HITL)** — pause before or inside a node, take a human's answer, and continue from that exact point.
 - **Time-travel** — fork a new thread from any past checkpoint. The original is preserved.
 - **Agent runtime** — GenServer agents, a signal bus, a ReAct preset, LLM/MCP adapters, cost guards.
@@ -161,17 +161,21 @@ ElGraph/                  # umbrella root (run mix test / mix format here)
 ```
 
 Durable checkpointers are **swappable adapters** implementing the core `ElGraph.Checkpointer`
-behaviour. ETS is in-memory (fast, but lost on restart); Postgres/Valkey resume threads across
-restarts and node replacement:
+behaviour. ETS is in-memory (fast, but lost on restart); the rest resume threads across restarts
+and node replacement:
 
 ```elixir
-# Postgres
+# BEAM built-in — zero external infra (shipped in core el_graph)
+cp = {ElGraph.Checkpointer.Dets,   ElGraph.Checkpointer.Dets.config(pid)}    # single file
+cp = {ElGraph.Checkpointer.Mnesia, ElGraph.Checkpointer.Mnesia.config(pid)}  # distributable (disc_copies)
+# External DBs (optional sibling apps)
 cp = {ElGraph.Checkpointer.Postgres, ElGraph.Checkpointer.Postgres.config(MyApp.Repo)}
-# Valkey/Redis
-cp = {ElGraph.Checkpointer.Redis, ElGraph.Checkpointer.Redis.config(:my_redix)}
+cp = {ElGraph.Checkpointer.Redis,    ElGraph.Checkpointer.Redis.config(:my_redix)}
 
 ElGraph.invoke(graph, input, checkpointer: cp, thread_id: "t1")
 ```
+
+Postgres needs a migration: `mix el_graph.ecto.gen.migration -r MyApp.Repo` then `mix ecto.migrate`.
 
 - Use **`el_graph`** alone for a headless (server-less) agent runtime.
 - **`el_trace`** adds a real-time observe/intervene UI. General-purpose tracing (spans/tokens)

@@ -18,6 +18,11 @@
 /examples/*/_build/
 /examples/*/deps/
 
+# BEAM 내장 체크포인터의 디스크 산출물 (Mnesia disc 스키마 디렉터리 / DETS 파일)
+# 노드명 패턴으로 한정 — 소스 파일 mnesia.ex와 충돌하지 않게.
+Mnesia.*@*/
+*.dets
+
 # Misc
 erl_crash.dump
 *.ez

@@ -15,9 +15,11 @@
 표방하는 것에 비해 **체크포인터가 ETS(휘발성) 하나뿐**인 점이 가장 큰 약점이다. 아래 P0를 닫으면
 README의 LangGraph 비교가 마케팅이 아니라 사실이 된다.
 
-> **진행 현황 (2026-06)**: **P0-1 완료** — `el_graph_ecto`(Postgres) + `el_graph_redis`(Valkey/Redis)
-> 어댑터를 추가하고 공유 계약 테스트(`ElGraph.CheckpointerContract`, lib로 이동해 재사용)로 검증했다.
-> 직렬화는 `:erlang.term_to_binary/1`(bytea / RESP). DB 미가용 시 테스트는 자동 제외. `docker-compose.yml` 제공.
+> **진행 현황 (2026-06)**: **P0-1 완료 + 운영 다듬기 완료**. 체크포인터 백엔드 5종 —
+> ETS(인메모리) · **DETS·Mnesia**(BEAM 내장·무인프라 디스크 영속, 코어 포함) · **Postgres**(`el_graph_ecto`)
+> · **Valkey/Redis**(`el_graph_redis`). 전부 공유 계약(`ElGraph.CheckpointerContract`, lib로 이동)과
+> `keep: {:last, n}` 보존정책 지원. Postgres 마이그레이션 generator(`mix el_graph.ecto.gen.migration`) 제공.
+> 직렬화는 `:erlang.term_to_binary/1`. DB 백엔드 테스트는 미가용 시 자동 제외(`docker-compose.yml` 제공).
 
 | 우선순위 | 항목 | 한 줄 | 아키텍처 영향 |
 |---|---|---|---|

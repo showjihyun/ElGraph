@@ -23,4 +23,20 @@ defmodule ElGraph.Checkpointer.RedisTest do
       assert {:ok, %ElGraph.Checkpoint{state: %{v: 1}}} = Redis.get(fresh, "dur", :latest)
     end
   end
+
+  describe "keep policy (SPEC §3.5 보존 정책)" do
+    test "keep: {:last, n} prunes older checkpoints and their writes on put", %{config: base} do
+      config = %{base | keep: {:last, 2}}
+
+      for step <- 0..4 do
+        :ok = Redis.put(config, %ElGraph.Checkpoint{thread_id: "t", step: step, state: %{}})
+        :ok = Redis.put_writes(config, "t", step, [{:a, %{}}])
+      end
+
+      assert [%{step: 3}, %{step: 4}] = Redis.list(config, "t")
+      assert :not_found = Redis.get(config, "t", 0)
+      assert [] = Redis.get_writes(config, "t", 0)
+      assert {:ok, %ElGraph.Checkpoint{step: 4}} = Redis.get(config, "t", :latest)
+    end
+  end
 end

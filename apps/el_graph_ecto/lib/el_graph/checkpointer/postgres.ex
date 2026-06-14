@@ -18,12 +18,18 @@ defmodule ElGraph.Checkpointer.Postgres do
   alias ElGraph.Checkpoint
   alias Ecto.Adapters.SQL
 
-  @doc "어댑터 config — 사용할 Ecto Repo를 지정한다(기본 `ElGraphEcto.Repo`)."
-  @spec config(module()) :: map()
-  def config(repo \\ ElGraphEcto.Repo), do: %{repo: repo}
+  @doc """
+  어댑터 config — 사용할 Ecto Repo와 보존정책을 지정한다.
+
+      config(MyApp.Repo)                       # 모든 체크포인트 보존(기본)
+      config(MyApp.Repo, keep: {:last, 50})    # thread별 최근 50개만 유지
+  """
+  @spec config(module(), keyword()) :: map()
+  def config(repo \\ ElGraphEcto.Repo, opts \\ []),
+    do: %{repo: repo, keep: Keyword.get(opts, :keep, :all)}
 
   @impl true
-  def put(%{repo: repo}, %Checkpoint{} = checkpoint) do
+  def put(%{repo: repo} = config, %Checkpoint{} = checkpoint) do
     with :ok <- Checkpoint.validate_serializable(checkpoint.state) do
       SQL.query!(
         repo,
@@ -41,6 +47,7 @@ defmodule ElGraph.Checkpointer.Postgres do
         ]
       )
 
+      prune(config, checkpoint.thread_id)
       :ok
     end
   end
@@ -107,4 +114,27 @@ defmodule ElGraph.Checkpointer.Postgres do
 
   defp one_checkpoint(%{rows: [[data]]}), do: {:ok, :erlang.binary_to_term(data)}
   defp one_checkpoint(%{rows: []}), do: :not_found
+
+  # 보존 정책 (SPEC §3.5): {:last, n}이면 thread별 최근 n개 step만 남기고 체크포인트와
+  # 해당 step의 pending writes를 정리한다.
+  defp prune(%{keep: :all}, _thread_id), do: :ok
+
+  defp prune(%{repo: repo, keep: {:last, n}}, thread_id) do
+    keep_steps =
+      "SELECT step FROM el_graph_checkpoints WHERE thread_id = $1 ORDER BY step DESC LIMIT $2"
+
+    SQL.query!(
+      repo,
+      "DELETE FROM el_graph_checkpoints WHERE thread_id = $1 AND step NOT IN (#{keep_steps})",
+      [thread_id, n]
+    )
+
+    SQL.query!(
+      repo,
+      "DELETE FROM el_graph_writes WHERE thread_id = $1 AND step NOT IN (#{keep_steps})",
+      [thread_id, n]
+    )
+
+    :ok
+  end
 end
