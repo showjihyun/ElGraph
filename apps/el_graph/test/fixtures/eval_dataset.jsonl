@@ -1,0 +1,4 @@
+{"input": {"n": 2}, "expect": {"n": 4}}
+{"input": {"n": 5}, "expect": {"n": 10}}
+
+{"input": {"n": 3}, "expect": {"n": 999}}

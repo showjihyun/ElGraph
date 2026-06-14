@@ -66,13 +66,13 @@
 상태: ✅(외부)
 
 ## T3.8 — Evals (`ElGraph.Eval`)
-시작 7.5 → 목표 9.5
+시작 7.5 → **달성 9.5**
 - [2] 데이터셋 평가 + 플러그형 스코어러 + LLM-judge ✅
-- [ ] 체크포인트-리플레이 기반 평가(분기 시나리오)
-- [ ] 병렬 평가(SubAgent/Task) + 집계 메트릭(p50/통과율/점수분포)
-- [ ] 데이터셋 로딩(JSONL) + 케이스 ID/태그
-- [ ] 회귀 비교(baseline 대비 delta)
-상태: ⬜
+- [2] 체크포인트-리플레이 평가 `replay_eval/6`(시나리오 분기, 공개 API만) ✅
+- [2] 병렬 평가(`max_concurrency`, ordered) + 집계 메트릭(mean/min/max/median/pass_rate) ✅
+- [1.5] JSONL 데이터셋 로딩 `load_jsonl/1` ✅
+- [2] baseline 회귀 비교 `compare/2`(regressions/improvements/delta) ✅
+상태: ✅ (13 tests)
 
 ## T3.9 — 가드레일 (`ElGraph.Guardrail`)
 시작 7.5 → 목표 9.5
