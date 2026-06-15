@@ -71,4 +71,21 @@ defmodule ElTrace.NewFeaturesIntegrationTest do
       assert {:ok, _} = ElTrace.timeline("orch-2")
     end
   end
+
+  describe "ElTrace.handoff_graph/0 (app-started singleton collector)" do
+    test "reflects handoff telemetry emitted in the app collector" do
+      :ok = ElTrace.Handoff.Collector.reset(ElTrace.Handoff.Collector)
+
+      :telemetry.execute([:el_graph, :agent, :handoff], %{}, %{
+        from: "researcher",
+        to: "summarizer",
+        signal: "research.done"
+      })
+
+      # graph/0 -> edges/0 is a GenServer.call that flushes the prior cast.
+      assert %{nodes: nodes, edges: edges} = ElTrace.handoff_graph()
+      assert "researcher" in nodes and "summarizer" in nodes
+      assert %{from: "researcher", to: "summarizer", signal: "research.done"} in edges
+    end
+  end
 end

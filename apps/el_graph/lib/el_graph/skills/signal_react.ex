@@ -64,8 +64,16 @@ defmodule ElGraph.Skills.SignalReAct do
   end
 
   @doc false
-  def __handle_signal__(skill_opts, %Signal{type: type, data: data}, _context) do
+  def __handle_signal__(skill_opts, %Signal{type: type, source: source, data: data}, _context) do
     if Signal.matches?(skill_opts[:route], type) do
+      if source do
+        :telemetry.execute([:el_graph, :agent, :handoff], %{}, %{
+          from: source,
+          to: to_string(skill_opts[:reply_tag]),
+          signal: type
+        })
+      end
+
       text = Map.fetch!(data, skill_opts[:input_key])
       {:run, %{messages: [LLM.user(text)]}}
     else

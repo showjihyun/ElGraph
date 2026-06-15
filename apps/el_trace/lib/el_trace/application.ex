@@ -24,6 +24,7 @@ defmodule ElTrace.Application do
     [
       {Phoenix.PubSub, name: ElTrace.PubSub},
       {ElTrace.Sessions, name: ElTrace.Sessions},
+      {ElTrace.Handoff.Collector, name: ElTrace.Handoff.Collector},
       ElTraceWeb.Endpoint
     ]
   end

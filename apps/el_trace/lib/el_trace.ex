@@ -12,6 +12,10 @@ defmodule ElTrace do
       # 브라우저에서 http://localhost:4000
 
   범용 trace(span/토큰)는 Langfuse에 위임하고, ElTrace는 체크포인트 인과만 다룬다.
+
+  멀티 에이전트 핸드오프 그래프(누가 어떤 시그널로 누구에게 넘겼는가)는 `handoff_graph/0`로
+  조회한다 — 앱이 띄운 싱글턴 컬렉터가 모은 엣지를 그래프로 만든다. DOT 렌더의 LiveView
+  표시는 후속 작업이다.
   """
 
   alias ElTrace.{Replay, Sessions, Timeline}
@@ -62,6 +66,10 @@ defmodule ElTrace do
         :error
     end
   end
+
+  @doc "앱이 띄운 싱글턴 컬렉터가 모은 멀티 에이전트 핸드오프 그래프."
+  @spec handoff_graph() :: map()
+  def handoff_graph(), do: ElTrace.Handoff.Collector.graph(ElTrace.Handoff.Collector)
 
   defp table, do: Sessions.table(Sessions)
 end
