@@ -1,0 +1,211 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  MIX_ENV: test
+  ELIXIR_VERSION: "1.18.3"
+  OTP_VERSION: "27.3"
+
+jobs:
+  # 컴파일 + 포맷 + 기본 테스트(인프라/키 없는 :integration 두 파일 포함).
+  build_test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Cache deps and _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Compile (warnings as errors)
+        run: mix compile --warnings-as-errors
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Run tests (default — :integration excluded)
+        run: mix test
+
+      # 네트워크/인프라/키가 필요 없는 통합 테스트 두 건을 명시적으로 실행.
+      - name: Run key-free integration tests
+        working-directory: apps/el_graph
+        run: mix test test/el_graph/otel/langfuse_pipeline_test.exs test/el_graph/sandbox/command_integration_test.exs --include integration
+
+  # Dialyzer 정적 분석 — 앱별로 PLT를 구성. PLT는 _build에 캐시.
+  dialyzer:
+    name: Dialyzer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Cache deps and _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-dialyzer-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-dialyzer-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Compile
+        run: mix compile
+
+      - name: Run Dialyzer per app
+        run: |
+          set -e
+          for app in el_graph el_graph_web el_trace el_graph_ecto el_graph_redis; do
+            echo "::group::dialyzer $app"
+            (cd "apps/$app" && mix dialyzer)
+            echo "::endgroup::"
+          done
+
+  # Postgres + Valkey 서비스 컨테이너로 :postgres/:redis 계약 테스트 실행.
+  integration:
+    name: Integration (Postgres + Valkey)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: el_graph_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d el_graph_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      valkey:
+        image: valkey/valkey:8-alpine
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # ecto test_helper / config/test.exs 가 읽는 Postgres 접속 정보.
+      ELGRAPH_PG_HOST: localhost
+      ELGRAPH_PG_PORT: "5433"
+      ELGRAPH_PG_USER: postgres
+      ELGRAPH_PG_PASSWORD: postgres
+      ELGRAPH_PG_DB: el_graph_test
+      # redis test_helper 는 REDIS_HOST/REDIS_PORT 를 우선 확인하고,
+      # 없으면 app env(ELGRAPH_REDIS_*)로 폴백한다 — 둘 다 지정한다.
+      REDIS_HOST: localhost
+      REDIS_PORT: "6380"
+      ELGRAPH_REDIS_HOST: localhost
+      ELGRAPH_REDIS_PORT: "6380"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Cache deps and _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Run el_graph_ecto suite (Postgres)
+        working-directory: apps/el_graph_ecto
+        run: mix test
+
+      - name: Run el_graph_redis suite (Valkey)
+        working-directory: apps/el_graph_redis
+        run: mix test
+
+  # 실 LLM 통합 테스트 — OPENAI_API_KEY 시크릿이 있을 때만 실행. 없으면 통째로 스킵.
+  live_llm:
+    name: Live LLM Integration
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip if no API key
+        id: guard
+        run: |
+          if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "OPENAI_API_KEY not set — skipping live LLM tests."
+          fi
+
+      - name: Set up Elixir/OTP
+        if: steps.guard.outputs.run == 'true'
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Cache deps and _build
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+
+      - name: Install dependencies
+        if: steps.guard.outputs.run == 'true'
+        run: mix deps.get
+
+      - name: Run live LLM integration tests
+        if: steps.guard.outputs.run == 'true'
+        working-directory: apps/el_graph
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: mix test --only integration

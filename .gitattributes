@@ -1,0 +1,11 @@
+# 소스/설정/문서는 LF로 고정한다. Windows(autocrlf)에서 작업해도 저장소 blob은 LF이며,
+# CI(Linux)의 `mix format --check-formatted` 게이트가 CRLF 때문에 깨지지 않는다.
+*.ex   text eol=lf
+*.exs  text eol=lf
+*.eex  text eol=lf
+*.heex text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.md   text eol=lf
+*.json text eol=lf
+mix.lock text eol=lf
