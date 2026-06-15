@@ -16,7 +16,7 @@
 | 7 | 문서화 | 0.08 | 9.3 | SPEC §14 표 + 모듈 moduledoc(예시 포함) + 체크리스트 + 본 루브릭 |
 | 8 | 안전/에러 처리 | 0.08 | 9.4 | 가드레일(PII/스키마/인가), 샌드박스 격리 위임 + 타임아웃(누수無) + Docker 하드격리, 스트리밍 에러 매핑, eval 크래시→실패 |
 | 9 | 아키텍처 적합성 | 0.05 | 9.7 | 전부 격리 신규 모듈/앱, 코어 런타임 의존 불변, "라이브러리는 서버 자동기동 안 함" 원칙 준수(`server_spec/1`) |
-| 10 | 품질 게이트 | 0.03 | 9.8 | `mix format` ✅ · `async: true` ✅ · `@spec` 전 공개함수 ✅ · doctest ✅(AGUI 3건) · **Dialyzer ✅ 도입·0경고**(el_graph·el_graph_web·el_trace 3개 앱) |
+| 10 | 품질 게이트 | 0.03 | 9.8 | `mix format` ✅ · `async: true` ✅ · `@spec` 전 공개함수 ✅ · doctest ✅(AGUI 3건) · **Dialyzer ✅ 0경고**(움브렐라 5개 앱 전부) |
 
 **종합(가중 평균): 9.48 / 10**
 
@@ -24,7 +24,7 @@
 
 - **품질 게이트(8.5→9.2)** — 개선 완료:
   - ✅ [완료] 핵심 순수 모듈(`ElGraph.AGUI`)에 실행 가능한 doctest 3건 추가 → 문서가 거짓말하지 않음을 컴파일타임 보장.
-  - ✅ [완료] Dialyzer 도입 — 3개 앱(el_graph·el_graph_web·el_trace) 전부 0경고. 실버그 수정(mfa()→mfargs(), Telemetry.attach/0 계약).
+  - ✅ [완료] Dialyzer 도입 — 움브렐라 5개 앱 전부 0경고(el_graph·el_graph_web·el_trace·el_graph_ecto·el_graph_redis). 실버그 수정(mfa()→mfargs(), Telemetry.attach/0 계약).
 - **통합/E2E(9.3)** — ✅ [완료] Anthropic/Gemini 증분 도구호출 스트리밍 동치화(3개 어댑터 전체 stream_step/3).
 - **문서화(9.3)** — `el_graph_web`의 README/사용 예시 보강 여지(현재 moduledoc 중심).
 
