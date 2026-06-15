@@ -85,11 +85,12 @@ defmodule ElGraph.Demo do
       raise "OPENAI_API_KEY 환경변수 또는 config/secrets.exs의 :openai_api_key가 필요합니다"
   end
 
-  defp secrets_key do
-    path = "config/secrets.exs"
+  # 저장소 루트 config/secrets.exs (gitignore됨) — CWD 비의존(@docs_dir와 동일 방식).
+  @secrets_path Path.expand("../../../../config/secrets.exs", __DIR__)
 
-    if File.exists?(path) do
-      {secrets, _bindings} = Code.eval_file(path)
+  defp secrets_key do
+    if File.exists?(@secrets_path) do
+      {secrets, _bindings} = Code.eval_file(@secrets_path)
       secrets[:openai_api_key]
     end
   end
