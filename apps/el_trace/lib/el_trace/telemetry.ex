@@ -24,7 +24,8 @@ defmodule ElTrace.Telemetry do
   @spec attach() :: :ok
   def attach do
     detach()
-    :telemetry.attach_many(@handler_id, @events, &__MODULE__.handle_event/4, %{})
+    _ = :telemetry.attach_many(@handler_id, @events, &__MODULE__.handle_event/4, %{})
+    :ok
   end
 
   @doc "핸들러를 뗀다."

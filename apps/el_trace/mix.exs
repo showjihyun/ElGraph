@@ -12,7 +12,17 @@ defmodule ElTrace.MixProject do
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      dialyzer: dialyzer()
+    ]
+  end
+
+  # Dialyzer 정적 타입 분석 (SPEC §10). Phoenix/LiveView 매크로 생성 코드의
+  # 불가피한 경고는 `.dialyzer_ignore.exs`로 격리한다.
+  defp dialyzer do
+    [
+      ignore_warnings: ".dialyzer_ignore.exs",
+      flags: [:error_handling, :missing_return]
     ]
   end
 
@@ -37,7 +47,8 @@ defmodule ElTrace.MixProject do
       {:bandit, "~> 1.5"},
       {:jason, "~> 1.4"},
       {:esbuild, "~> 0.8", only: :dev},
-      {:lazy_html, ">= 0.1.0", only: :test}
+      {:lazy_html, ">= 0.1.0", only: :test},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
   end
 end

@@ -12,7 +12,16 @@ defmodule ElGraphWeb.MixProject do
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      dialyzer: dialyzer()
+    ]
+  end
+
+  # Dialyzer 정적 타입 분석 (SPEC §10). 외부/프레임워크 경고는 `.dialyzer_ignore.exs`로 격리.
+  defp dialyzer do
+    [
+      ignore_warnings: ".dialyzer_ignore.exs",
+      flags: [:error_handling, :missing_return]
     ]
   end
 
@@ -34,7 +43,8 @@ defmodule ElGraphWeb.MixProject do
       {:plug, "~> 1.16"},
       {:bandit, "~> 1.5"},
       {:jason, "~> 1.4"},
-      {:req, "~> 0.6"}
+      {:req, "~> 0.6"},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
   end
 end

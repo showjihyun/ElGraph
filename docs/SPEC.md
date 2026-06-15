@@ -265,10 +265,12 @@ end
 
 ## 10. 품질 게이트
 
-- 모든 공개 API에 `@spec` + Dialyzer 통과. **Dialyzer 도입 완료(2026-06)**: `apps/el_graph`에
-  dialyxir + `dialyzer:`(flags: error_handling/extra_return/missing_return) 설정, `mix dialyzer`
-  **0 경고**. 도입 중 실타입 버그 발견·수정: 노드/라우터/reducer 타입이 `mfa()`(=arity)로 잘못
-  선언돼 있던 것을 `Graph.mfargs()`(`{module, fun, [args]}`)로 정정. PLT는 `_build`에 캐시.
+- 모든 공개 API에 `@spec` + Dialyzer 통과. **Dialyzer 도입 완료(2026-06) — 3개 앱 전부**
+  (`el_graph`·`el_graph_web`·`el_trace`)에 dialyxir + `dialyzer:`(flags: error_handling/missing_return)
+  설정, 각 `mix dialyzer` **0 경고**. 도입 중 실타입 버그 발견·수정: 노드/라우터/reducer 타입이
+  `mfa()`(=arity)로 잘못 선언돼 있던 것을 `Graph.mfargs()`(`{module, fun, [args]}`)로 정정;
+  `ElTrace.Telemetry.attach/0` 반환 계약을 `:ok`로 명시. (`:extra_return`은 "넓지만 정확한"
+  API 스펙—예: `iodata()`—에 false-positive라 제외.) PLT는 `_build`에 캐시.
 - ExDoc 문서 + 모든 공개 함수에 doctest 또는 예제
 - 테스트 전부 `async: true` (전역 상태 결합 금지의 리트머스)
 

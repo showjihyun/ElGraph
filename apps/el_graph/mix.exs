@@ -22,7 +22,7 @@ defmodule ElGraph.MixProject do
   defp dialyzer do
     [
       ignore_warnings: ".dialyzer_ignore.exs",
-      flags: [:error_handling, :extra_return, :missing_return]
+      flags: [:error_handling, :missing_return]
     ]
   end
 
