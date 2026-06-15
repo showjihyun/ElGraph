@@ -4,6 +4,9 @@ defmodule ElGraph.Ctx do
 
   스트리밍 이벤트 방출, 협조적 취소 확인, 실행 메타데이터 접근의 통로다.
   동적 인터럽트(`interrupt/2`)는 체크포인터와 함께 도입된다.
+
+  `:assigns`는 호출 단위(per-invocation)의 읽기 전용 컨텍스트로,
+  `invoke(graph, input, assigns: %{...})`로 주입되어 모든 노드의 `ctx.assigns`로 전달된다.
   """
 
   defstruct [
@@ -13,7 +16,8 @@ defmodule ElGraph.Ctx do
     :event_sink,
     resume_values: [],
     interrupt_counter: nil,
-    cancel_flag: nil
+    cancel_flag: nil,
+    assigns: %{}
   ]
 
   @type t :: %__MODULE__{
@@ -23,7 +27,8 @@ defmodule ElGraph.Ctx do
           event_sink: pid() | nil,
           resume_values: [term()],
           interrupt_counter: :counters.counters_ref() | nil,
-          cancel_flag: :atomics.atomics_ref() | nil
+          cancel_flag: :atomics.atomics_ref() | nil,
+          assigns: map()
         }
 
   @doc """

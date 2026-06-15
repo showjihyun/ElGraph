@@ -1,9 +1,5 @@
-# async: false — this test sets a global Application env (:code_exec_sandbox) because in a
-# graph the tool context is an ElGraph.Ctx (not a map with :sandbox), so CodeExec falls back
-# to Application.get_env. Mutating Application env is process-global, so it cannot run
-# concurrently with other tests that might read the same key.
 defmodule ElGraph.Presets.ReActCodeExecTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias ElGraph.{LLM, Presets}
   alias ElGraph.Actions.CodeExec
@@ -16,13 +12,7 @@ defmodule ElGraph.Presets.ReActCodeExecTest do
     def run(_code, _opts), do: {:ok, %{stdout: "42", exit_code: 0, truncated: false}}
   end
 
-  setup do
-    Application.put_env(:el_graph, :code_exec_sandbox, {MockSandbox, []})
-    on_exit(fn -> Application.delete_env(:el_graph, :code_exec_sandbox) end)
-    :ok
-  end
-
-  test "CodeExec runs through the agent loop using the configured sandbox" do
+  test "CodeExec runs through the agent loop using the sandbox from ctx.assigns" do
     {:ok, pid} =
       ScriptedLLM.start_link([
         LLM.assistant(nil, [LLM.tool_call("c1", "code_exec", %{"code" => "IO.puts(42)"})]),
@@ -32,7 +22,9 @@ defmodule ElGraph.Presets.ReActCodeExecTest do
     graph = Presets.react({ScriptedLLM, pid}, [CodeExec])
 
     assert {:ok, %{messages: messages}} =
-             ElGraph.invoke(graph, %{messages: [LLM.user("compute 6*7")]})
+             ElGraph.invoke(graph, %{messages: [LLM.user("compute 6*7")]},
+               assigns: %{sandbox: {MockSandbox, []}}
+             )
 
     assert [
              %{role: :user},

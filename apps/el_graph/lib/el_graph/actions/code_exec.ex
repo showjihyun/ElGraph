@@ -6,9 +6,10 @@ defmodule ElGraph.Actions.CodeExec do
   백엔드에 위임한다 — **인프로세스 eval은 절대 하지 않는다**. 백엔드 미설정 시 명확히 에러.
 
   백엔드 해석 순서:
-    1. `context[:sandbox]` (`{module, opts}`) — 호출 시 주입
-    2. `Application.get_env(:el_graph, :code_exec_sandbox)`
-    3. 없음 → `{:error, :no_sandbox_configured}`
+    1. `ctx.assigns[:sandbox]` (`{module, opts}`) — `invoke(graph, input, assigns: %{...})`로 주입
+    2. `context[:sandbox]` (`{module, opts}`) 맵 — 직접 `execute(params, %{sandbox: ...})` 호출 시
+    3. `Application.get_env(:el_graph, :code_exec_sandbox)`
+    4. 없음 → `{:error, :no_sandbox_configured}`
   """
 
   use ElGraph.Action,
@@ -34,6 +35,9 @@ defmodule ElGraph.Actions.CodeExec do
         {:error, :no_sandbox_configured}
     end
   end
+
+  defp resolve_backend(%ElGraph.Ctx{assigns: %{sandbox: {module, opts}}}) when is_atom(module),
+    do: {module, opts}
 
   defp resolve_backend(%{sandbox: {module, opts}}) when is_atom(module), do: {module, opts}
 

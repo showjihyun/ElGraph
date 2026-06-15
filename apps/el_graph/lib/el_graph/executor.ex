@@ -121,6 +121,7 @@ defmodule ElGraph.Executor do
           Integer.to_string(System.unique_integer([:positive]))
         end),
       event_sink: Keyword.get(opts, :event_sink),
+      assigns: Keyword.get(opts, :assigns, %{}),
       checkpointer: Keyword.get(opts, :checkpointer),
       max_steps: Keyword.get(opts, :max_steps, @default_max_steps),
       interrupt_before: Keyword.get(opts, :interrupt_before, []),
@@ -285,6 +286,7 @@ defmodule ElGraph.Executor do
       step: step,
       node: node,
       event_sink: meta.event_sink,
+      assigns: meta.assigns,
       resume_values: resume_values(meta, node, step),
       interrupt_counter: :counters.new(1, []),
       cancel_flag: meta.cancel_flag
