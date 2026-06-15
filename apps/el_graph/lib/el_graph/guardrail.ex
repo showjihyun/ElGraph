@@ -20,7 +20,15 @@ defmodule ElGraph.Guardrail do
 
   alias ElGraph.Guardrail.PII
 
-  @doc "가드를 순서대로 적용한다. 통과 시 `{:ok, value}`, 차단 시 `{:blocked, reason}`."
+  @doc """
+  가드를 순서대로 적용한다. 통과 시 `{:ok, value}`, 차단 시 `{:blocked, reason}`.
+
+      iex> ElGraph.Guardrail.check([], "hi")
+      {:ok, "hi"}
+
+      iex> ElGraph.Guardrail.check([ElGraph.Guardrail.max_length(3)], "toolong")
+      {:blocked, {:too_long, 3}}
+  """
   @spec check([guard()], term(), map()) :: {:ok, term()} | {:blocked, term()}
   def check(guards, value, ctx \\ %{}) do
     result =

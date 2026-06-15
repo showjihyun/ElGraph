@@ -3,6 +3,8 @@ defmodule ElTrace.HandoffTest do
 
   alias ElTrace.Handoff
 
+  doctest ElTrace.Handoff
+
   test "build collects unique sorted nodes and deduped edges" do
     edges = [
       %{from: "researcher", to: "summarizer", signal: "research.done"},

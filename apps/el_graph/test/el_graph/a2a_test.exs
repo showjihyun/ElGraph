@@ -3,6 +3,8 @@ defmodule ElGraph.A2ATest do
 
   alias ElGraph.A2A
 
+  doctest ElGraph.A2A
+
   describe "to_task_state/1 — Task 생명주기 매핑 (SPEC §6)" do
     test "{:ok, state} maps to COMPLETED with the final state" do
       assert %{state: "completed", result: %{answer: "done"}} =

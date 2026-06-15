@@ -4,6 +4,8 @@ defmodule ElGraph.GuardrailTest do
   alias ElGraph.Guardrail
   alias ElGraph.Guardrail.PII
 
+  doctest ElGraph.Guardrail
+
   describe "check/3 — sequential guards" do
     test "no guards passes the value through" do
       assert {:ok, "hi"} = Guardrail.check([], "hi")

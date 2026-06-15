@@ -1,7 +1,7 @@
 defmodule ElGraph.OrchestrationTest do
   use ExUnit.Case, async: true
 
-  alias ElGraph.{LLM, Orchestration}
+  alias ElGraph.{LLM, LLMError, Orchestration}
   alias ElGraph.Test.ScriptedLLM
 
   # 워커 노드 함수 (원격 캡처 — durable 계약).
@@ -222,6 +222,24 @@ defmodule ElGraph.OrchestrationTest do
       # gathered by the researcher worker on the prior turn.
       [last_call | _] = Enum.reverse(ScriptedLLM.calls(llm))
       assert String.contains?(last_call.opts[:system], "research: found 3 facts")
+    end
+  end
+
+  describe "error path — LLM 실패 시 오케스트레이터가 LLMError로 크래시 (executor가 래핑)" do
+    test "supervisor: LLM {:error}는 {:node_crashed, :orchestrator, %LLMError{}}로 반환" do
+      {:ok, llm} = ScriptedLLM.start_link([{:error, :rate_limited}])
+      graph = Orchestration.supervisor({ScriptedLLM, llm}, workers(), [])
+
+      assert {:error, {:node_crashed, :orchestrator, %LLMError{reason: :rate_limited}}} =
+               ElGraph.invoke(graph, %{messages: [LLM.user("go")]})
+    end
+
+    test "magentic: LLM {:error}도 동일하게 LLMError로 크래시" do
+      {:ok, llm} = ScriptedLLM.start_link([{:error, :rate_limited}])
+      graph = Orchestration.magentic({ScriptedLLM, llm}, workers(), [])
+
+      assert {:error, {:node_crashed, :orchestrator, %LLMError{reason: :rate_limited}}} =
+               ElGraph.invoke(graph, %{messages: [LLM.user("go")]})
     end
   end
 end

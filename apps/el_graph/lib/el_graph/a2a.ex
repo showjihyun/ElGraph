@@ -15,7 +15,15 @@ defmodule ElGraph.A2A do
 
   alias ElGraph.Checkpoint
 
-  @doc "ElGraph 실행 결과를 A2A Task 상태(맵)로 변환한다."
+  @doc """
+  ElGraph 실행 결과를 A2A Task 상태(맵)로 변환한다.
+
+      iex> ElGraph.A2A.to_task_state({:ok, %{answer: 42}}).state
+      "completed"
+
+      iex> ElGraph.A2A.to_task_state({:error, :boom}).state
+      "failed"
+  """
   @spec to_task_state(tuple()) :: map()
   def to_task_state({:ok, state}), do: %{state: "completed", result: state}
   def to_task_state({:error, reason}), do: %{state: "failed", error: reason}
@@ -80,7 +88,12 @@ defmodule ElGraph.A2A do
     }
   end
 
-  @doc "A2A Message(JSON)에서 ElGraph 시그널 입력을 추출한다 (text part들을 이어붙임)."
+  @doc """
+  A2A Message(JSON)에서 ElGraph 시그널 입력을 추출한다 (text part들을 이어붙임).
+
+      iex> ElGraph.A2A.message_to_input(%{"parts" => [%{"text" => "엘릭서"}, %{"text" => " 검색"}]})
+      %{question: "엘릭서 검색"}
+  """
   @spec message_to_input(map()) :: %{question: String.t()}
   def message_to_input(%{"parts" => parts}) do
     text =

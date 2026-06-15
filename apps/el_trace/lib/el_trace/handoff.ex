@@ -14,6 +14,9 @@ defmodule ElTrace.Handoff do
   @doc """
   엣지 목록에서 그래프를 만든다. 노드는 from/to에서 모은 유일한 에이전트 id를 정렬한 것,
   엣지는 동일한 (from, to, signal) 삼중을 하나로 합친 것이다.
+
+      iex> ElTrace.Handoff.build([%{from: "b", to: "a", signal: "s"}]).nodes
+      ["a", "b"]
   """
   @spec build([edge()]) :: graph()
   def build(edges) do
@@ -39,7 +42,12 @@ defmodule ElTrace.Handoff do
     "digraph handoff {\n" <> lines <> "\n}"
   end
 
-  @doc "그래프를 사람이 읽는 텍스트 줄(`a --signal--> b`)로 렌더한다."
+  @doc """
+  그래프를 사람이 읽는 텍스트 줄(`a --signal--> b`)로 렌더한다.
+
+      iex> ElTrace.Handoff.render(ElTrace.Handoff.build([%{from: "a", to: "b", signal: "go"}]))
+      "a --go--> b"
+  """
   @spec render(graph()) :: String.t()
   def render(%{edges: edges}) do
     Enum.map_join(edges, "\n", fn %{from: from, to: to, signal: signal} ->

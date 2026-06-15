@@ -78,7 +78,9 @@ defmodule ElGraph.Sandbox.DockerTest do
     end
 
     test "returns {:error, :timeout} when the runner exceeds :timeout" do
-      runner = fn _, _, _ -> Process.sleep(:infinity) end
+      # 멈춘(hang) 프로세스 시뮬레이션 — 타임아웃이 Task를 죽일 때까지 블록한다.
+      # (Process.sleep는 TDD-SPEC 금지 — receive로 동등하게 블록)
+      runner = fn _, _, _ -> receive do: (:never -> :ok) end
 
       assert {:error, :timeout} =
                Docker.run("loop", language: "elixir", runner: runner, timeout: 50)

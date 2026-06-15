@@ -16,7 +16,7 @@
 | 7 | 문서화 | 0.08 | 9.3 | SPEC §14 표 + 모듈 moduledoc(예시 포함) + 체크리스트 + 본 루브릭 |
 | 8 | 안전/에러 처리 | 0.08 | 9.6 | 가드레일(PII/스키마/인가) + **ReAct 입출력 가드 연동 + el_graph_web API키 인증·입력 가드레일**, 샌드박스 격리+타임아웃(누수無)+Docker, 스트리밍 에러 매핑, eval 크래시→실패 |
 | 9 | 아키텍처 적합성 | 0.05 | 9.7 | 전부 격리 신규 모듈/앱, 코어 런타임 의존 불변, "라이브러리는 서버 자동기동 안 함" 원칙 준수(`server_spec/1`) |
-| 10 | 품질 게이트 | 0.03 | 9.9 | `mix format`·`async`·`@spec`·doctest(AGUI)·Dialyzer 0(6앱) ✅ + **CI(GitHub Actions)로 format/test/dialyzer 자동 강제** + docker-compose 통합 인프라 |
+| 10 | 품질 게이트 | 0.03 | 9.9 | `mix format`·`async`·`@spec`·doctest(AGUI/A2A/Guardrail/Handoff 10건)·Dialyzer 0(6앱) ✅ + **CI(GitHub Actions)로 format/test/dialyzer 자동 강제** + docker-compose 통합 인프라 |
 
 **종합(가중 평균): 9.53 / 10**
 
