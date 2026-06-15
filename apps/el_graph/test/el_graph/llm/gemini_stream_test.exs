@@ -112,4 +112,78 @@ defmodule ElGraph.LLM.GeminiStreamTest do
               }} = Gemini.reduce_chunks(chunks)
     end
   end
+
+  describe "stream_chat/3 via Req.Test — end-to-end SSE behavior" do
+    test "streams text deltas and assembles the final response with usage" do
+      sse =
+        ~s(data: {"candidates":[{"content":{"parts":[{"text":"Hel"}]}}]}\n\n) <>
+          ~s(data: {"candidates":[{"content":{"parts":[{"text":"lo"}]}}]}\n\n) <>
+          ~s(data: {"candidates":[{"content":{"parts":[{"text":" world"}]}}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}\n\n)
+
+      Req.Test.stub(GeminiStreamTextStub, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("text/event-stream")
+        |> Plug.Conn.send_resp(200, sse)
+      end)
+
+      config = [api_key: "k", req_options: [plug: {Req.Test, GeminiStreamTextStub}]]
+      parent = self()
+
+      assert {:ok,
+              %{
+                message: %{role: :assistant, content: "Hello world", tool_calls: []},
+                usage: %{input_tokens: 3, output_tokens: 2}
+              }} =
+               Gemini.stream_chat(config, [ElGraph.LLM.user("hi")],
+                 on_delta: fn d -> send(parent, {:delta, d}) end
+               )
+
+      assert_received {:delta, {:token, "Hel"}}
+      assert_received {:delta, {:token, "lo"}}
+      assert_received {:delta, {:token, " world"}}
+    end
+
+    test "streams a functionCall and assembles tool_calls in the final response" do
+      sse =
+        ~s(data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"web_search","args":{"q":"elixir"}}}]}}]}\n\n) <>
+          ~s(data: {"candidates":[{"content":{"parts":[]}}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":4}}\n\n)
+
+      Req.Test.stub(GeminiStreamToolStub, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("text/event-stream")
+        |> Plug.Conn.send_resp(200, sse)
+      end)
+
+      config = [api_key: "k", req_options: [plug: {Req.Test, GeminiStreamToolStub}]]
+      parent = self()
+
+      assert {:ok,
+              %{
+                message: %{
+                  role: :assistant,
+                  content: nil,
+                  tool_calls: [%{id: "web_search", name: "web_search", args: %{"q" => "elixir"}}]
+                }
+              }} =
+               Gemini.stream_chat(config, [ElGraph.LLM.user("search")],
+                 on_delta: fn d -> send(parent, {:delta, d}) end
+               )
+
+      assert_received {:delta, {:tool_call_start, "web_search", "web_search"}}
+      assert_received {:delta, {:tool_call_end, "web_search"}}
+    end
+
+    test "maps a 500 streaming response to {:api_error, 500, body}" do
+      Req.Test.stub(GeminiStream500Stub, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("text/event-stream")
+        |> Plug.Conn.send_resp(500, "boom")
+      end)
+
+      config = [api_key: "k", req_options: [plug: {Req.Test, GeminiStream500Stub}]]
+
+      assert {:error, {:api_error, 500, _body}} =
+               Gemini.stream_chat(config, [ElGraph.LLM.user("hi")], [])
+    end
+  end
 end

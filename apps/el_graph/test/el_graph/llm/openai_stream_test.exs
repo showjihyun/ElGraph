@@ -185,6 +185,87 @@ defmodule ElGraph.LLM.OpenAIStreamTest do
     end
   end
 
+  describe "stream_chat/3 via Req.Test — end-to-end SSE behavior" do
+    test "streams text deltas and assembles the final response" do
+      sse =
+        ~s(data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n) <>
+          ~s(data: {"choices":[{"delta":{"content":"lo"}}]}\n\n) <>
+          ~s(data: {"choices":[{"delta":{"content":" world"}}]}\n\n) <>
+          ~s(data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\n) <>
+          ~s(data: [DONE]\n\n)
+
+      Req.Test.stub(OpenAIStreamTextStub, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("text/event-stream")
+        |> Plug.Conn.send_resp(200, sse)
+      end)
+
+      config = [api_key: "k", req_options: [plug: {Req.Test, OpenAIStreamTextStub}]]
+      parent = self()
+
+      assert {:ok,
+              %{
+                message: %{role: :assistant, content: "Hello world", tool_calls: []},
+                usage: %{input_tokens: 3, output_tokens: 2}
+              }} =
+               OpenAI.stream_chat(config, [ElGraph.LLM.user("hi")],
+                 on_delta: fn d -> send(parent, {:delta, d}) end
+               )
+
+      assert_received {:delta, {:token, "Hel"}}
+      assert_received {:delta, {:token, "lo"}}
+      assert_received {:delta, {:token, " world"}}
+    end
+
+    test "streams incremental tool-call deltas and assembles tool_calls" do
+      sse =
+        ~s(data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"web_search","arguments":""}}]}}]}\n\n) <>
+          ~s(data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"q\\":"}}]}}]}\n\n) <>
+          ~s(data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"elixir\\"}"}}]}}]}\n\n) <>
+          ~s(data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n) <>
+          ~s(data: [DONE]\n\n)
+
+      Req.Test.stub(OpenAIStreamToolStub, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("text/event-stream")
+        |> Plug.Conn.send_resp(200, sse)
+      end)
+
+      config = [api_key: "k", req_options: [plug: {Req.Test, OpenAIStreamToolStub}]]
+      parent = self()
+
+      assert {:ok,
+              %{
+                message: %{
+                  role: :assistant,
+                  content: nil,
+                  tool_calls: [%{id: "call_1", name: "web_search", args: %{"q" => "elixir"}}]
+                }
+              }} =
+               OpenAI.stream_chat(config, [ElGraph.LLM.user("search")],
+                 on_delta: fn d -> send(parent, {:delta, d}) end
+               )
+
+      assert_received {:delta, {:tool_call_start, "call_1", "web_search"}}
+      assert_received {:delta, {:tool_call_delta, "call_1", "{\"q\":"}}
+      assert_received {:delta, {:tool_call_delta, "call_1", "\"elixir\"}"}}
+      assert_received {:delta, {:tool_call_end, "call_1"}}
+    end
+
+    test "maps a 500 streaming response to {:api_error, 500, body}" do
+      Req.Test.stub(OpenAIStream500Stub, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("text/event-stream")
+        |> Plug.Conn.send_resp(500, "boom")
+      end)
+
+      config = [api_key: "k", req_options: [plug: {Req.Test, OpenAIStream500Stub}]]
+
+      assert {:error, {:api_error, 500, _body}} =
+               OpenAI.stream_chat(config, [ElGraph.LLM.user("hi")], [])
+    end
+  end
+
   describe "stream_chat/3 — error handling" do
     test "maps a non-200 streaming response to {:api_error, status, body}" do
       Req.Test.stub(OpenAIStreamErrStub, fn conn ->
