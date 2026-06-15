@@ -37,6 +37,16 @@
 
 종합 스위트: el_graph 422 · el_graph_web 42 · el_trace 29 · el_graph_ecto 1 = **494 runnable 그린**, 6앱 Dialyzer 0.
 
+## TDD 감사 후속 보강 (2026-06-16)
+
+TDD-SPEC 관점 전수 점검에서 도출한 6개 항목을 모두 폐쇄:
+- ✅ **#1 에러경로** — `Orchestration`(supervisor/magentic)의 LLM 실패 경로를 공개 invoke로 검증(`{:error, {:node_crashed, :orchestrator, %LLMError{}}}`).
+- ✅ **#2 doctest** — 순수 모듈 doctest 1→4 모듈(AGUI/A2A/Guardrail/Handoff, 10건).
+- ✅ **#3 Process.sleep 금지** — 샌드박스 타임아웃 테스트를 `receive`로 교체.
+- ✅ **#4 스트리밍 행위 테스트** — Req.Test로 `stream_chat/3` 3개 어댑터 end-to-end(SSE→공개 결과/델타), 내부함수 결합 보완.
+- ✅ **#6 async 결합 제거** — `Ctx.:assigns`(invoke 옵션 주입)로 `react_codeexec_test`의 app-env 전역 결합 제거 → `async: true`화.
+- (#5 통합 RED→GREEN 로컬 미실행 = 키/인프라 부재, CI-secrets 의존 — 환경 게이트로 수용.)
+
 ## 차원별 개선 액션
 
 - **품질 게이트(8.5→9.2)** — 개선 완료:
