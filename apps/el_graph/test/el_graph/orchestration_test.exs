@@ -182,5 +182,46 @@ defmodule ElGraph.OrchestrationTest do
       assert {:ok, %{usage: %{input_tokens: _, output_tokens: _}}} =
                ElGraph.invoke(graph, %{messages: [LLM.user("go")]})
     end
+
+    test "captures the task from the first user message" do
+      {:ok, llm} = ScriptedLLM.start_link([LLM.assistant("DONE")])
+      graph = Orchestration.magentic({ScriptedLLM, llm}, workers(), [])
+
+      assert {:ok, %{ledger: %{task: "Write a report"}}} =
+               ElGraph.invoke(graph, %{messages: [LLM.user("Write a report")]})
+    end
+
+    test "accumulates each worker's output into the ledger facts in order" do
+      {:ok, llm} =
+        ScriptedLLM.start_link([
+          LLM.assistant("researcher"),
+          LLM.assistant("writer"),
+          LLM.assistant("DONE")
+        ])
+
+      graph = Orchestration.magentic({ScriptedLLM, llm}, workers(), [])
+
+      assert {:ok, %{ledger: %{facts: facts}}} =
+               ElGraph.invoke(graph, %{messages: [LLM.user("go")]})
+
+      assert ["research: found 3 facts", "write: drafted summary"] == facts
+    end
+
+    test "the orchestrator system prompt includes gathered facts after a worker ran" do
+      {:ok, llm} =
+        ScriptedLLM.start_link([
+          LLM.assistant("researcher"),
+          LLM.assistant("DONE")
+        ])
+
+      graph = Orchestration.magentic({ScriptedLLM, llm}, workers(), [])
+
+      assert {:ok, _} = ElGraph.invoke(graph, %{messages: [LLM.user("go")]})
+
+      # the LAST orchestrator call's system prompt must reflect the fact
+      # gathered by the researcher worker on the prior turn.
+      [last_call | _] = Enum.reverse(ScriptedLLM.calls(llm))
+      assert String.contains?(last_call.opts[:system], "research: found 3 facts")
+    end
   end
 end

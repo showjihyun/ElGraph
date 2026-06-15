@@ -49,6 +49,17 @@ defmodule ElGraph.Orchestration do
           required(:run) => (map(), ElGraph.Ctx.t() -> map())
         }
 
+  @typedoc """
+  magentic 작업 원장 — 작업(task) + 누적 사실(facts) + 진행(chosen/stalls).
+  (magentic-one 패턴)
+  """
+  @type ledger :: %{
+          task: String.t() | nil,
+          chosen: [atom()],
+          facts: [String.t()],
+          stalls: non_neg_integer()
+        }
+
   @doc """
   오케스트레이터-워커 그래프를 빌드한다.
 
@@ -105,14 +116,14 @@ defmodule ElGraph.Orchestration do
         reducer: {LLM, :add_usage, []}
       )
       |> ElGraph.state(:next, default: nil)
-      |> ElGraph.state(:ledger, default: %{chosen: [], stalls: 0})
+      |> ElGraph.state(:ledger, default: %{task: nil, chosen: [], facts: [], stalls: 0})
       |> ElGraph.add_node(:orchestrator, {__MODULE__, :magentic_orchestrate, [cfg]})
       |> ElGraph.add_conditional_edge(:orchestrator, {__MODULE__, :route, []})
 
     graph =
       Enum.reduce(workers, graph, fn worker, g ->
         g
-        |> ElGraph.add_node(worker.name, {__MODULE__, :run_worker, [worker]})
+        |> ElGraph.add_node(worker.name, {__MODULE__, :run_magentic_worker, [worker]})
         |> ElGraph.add_edge(worker.name, :orchestrator)
       end)
 
@@ -193,7 +204,9 @@ defmodule ElGraph.Orchestration do
   @doc false
   def magentic_orchestrate(%{messages: messages, ledger: ledger}, _ctx, cfg) do
     {mod, config} = cfg.llm
-    system = orchestrator_system(cfg.workers, cfg.system)
+    # FIRST turn: capture the task from the first user message (only if not set).
+    ledger = capture_task(ledger, messages)
+    system = magentic_system(cfg.workers, cfg.system, ledger)
 
     case mod.chat(config, messages, system: system) do
       {:ok, %{message: message} = response} ->
@@ -212,17 +225,27 @@ defmodule ElGraph.Orchestration do
     end
   end
 
+  # 원장에 task가 없으면 첫 user 메시지 내용을 task로 잡는다.
+  defp capture_task(%{task: nil} = ledger, messages) do
+    case Enum.find(messages, &match?(%{role: :user, content: c} when is_binary(c), &1)) do
+      %{content: content} -> %{ledger | task: content}
+      nil -> ledger
+    end
+  end
+
+  defp capture_task(ledger, _messages), do: ledger
+
   # 선택을 원장에 기록하고, 동일 워커 연속 선택이 max_stalls를 초과하면 강제 종료한다.
   defp apply_ledger(ledger, @done, _max_stalls) do
     {@done, ledger}
   end
 
-  defp apply_ledger(%{chosen: chosen, stalls: stalls}, choice, max_stalls) do
+  defp apply_ledger(%{chosen: chosen, stalls: stalls} = ledger, choice, max_stalls) do
     # `stalls` counts consecutive repeats of the same worker (1 = chosen twice in a
     # row, 2 = three times, ...). When it reaches `max_stalls` the run is forced to
     # terminate before the worker is dispatched again.
     stalls = if List.last(chosen) == choice, do: stalls + 1, else: 0
-    new_ledger = %{chosen: chosen ++ [choice], stalls: stalls}
+    new_ledger = %{ledger | chosen: chosen ++ [choice], stalls: stalls}
 
     if stalls >= max_stalls do
       {@done, new_ledger}
@@ -238,6 +261,28 @@ defmodule ElGraph.Orchestration do
 
   @doc false
   def run_worker(state, ctx, worker), do: worker.run.(state, ctx)
+
+  # magentic 워커 래퍼: 워커를 실행하고 그 산출물 텍스트를 원장 facts에 누적한다.
+  # :messages 업데이트와 갱신된 :ledger를 함께 반환한다(ledger 채널은 overwrite).
+  @doc false
+  def run_magentic_worker(state, ctx, worker) do
+    update = worker.run.(state, ctx)
+    output = worker_output_text(update)
+    ledger = state.ledger
+    new_ledger = %{ledger | facts: ledger.facts ++ [output]}
+
+    Map.put(update, :ledger, new_ledger)
+  end
+
+  # 워커 산출물에서 마지막 assistant 메시지 content를, 없으면 update 전체를 텍스트화한다.
+  defp worker_output_text(%{messages: messages}) when is_list(messages) do
+    case Enum.reverse(messages) do
+      [%{role: :assistant, content: content} | _] when is_binary(content) -> content
+      _ -> inspect(messages)
+    end
+  end
+
+  defp worker_output_text(update), do: inspect(update)
 
   ## 내부
 
@@ -256,6 +301,19 @@ defmodule ElGraph.Orchestration do
       """
 
     if extra, do: extra <> "\n\n" <> base, else: base
+  end
+
+  # orchestrator_system + 현재 task와 지금까지 모인 facts 섹션을 덧붙인다.
+  defp magentic_system(workers, extra, ledger) do
+    base = orchestrator_system(workers, extra)
+
+    facts_section =
+      case ledger.facts do
+        [] -> "Facts so far:\n- (none)"
+        facts -> "Facts so far:\n" <> Enum.map_join(facts, "\n", &"- #{&1}")
+      end
+
+    base <> "\n\nTask: #{ledger.task}\n#{facts_section}\n"
   end
 
   # assistant 응답에서 워커 선택을 파싱한다. 매칭 실패는 안전하게 종료(DONE)로 본다.
