@@ -136,24 +136,8 @@ defmodule ElGraph.GuardrailTest do
     end
   end
 
-  describe "block telemetry" do
-    test "emits a block event on a blocked check" do
-      ref = :telemetry_test.attach_event_handlers(self(), [[:el_graph, :guardrail, :block]])
-
-      assert {:blocked, :secret_leak} =
-               Guardrail.check([Guardrail.deny(~r/secret/, :secret_leak)], "the secret")
-
-      assert_receive {[:el_graph, :guardrail, :block], ^ref, %{count: 1}, %{reason: :secret_leak}}
-    end
-
-    test "does not emit on a passing check" do
-      ref = :telemetry_test.attach_event_handlers(self(), [[:el_graph, :guardrail, :block]])
-
-      assert {:ok, "fine"} = Guardrail.check([Guardrail.deny(~r/secret/, :x)], "fine")
-
-      refute_receive {[:el_graph, :guardrail, :block], ^ref, _, _}, 50
-    end
-  end
+  # block telemetry 테스트는 전역 telemetry + refute_receive라 async 오염되어
+  # `ElGraph.GuardrailTelemetryTest`(async: false)로 분리했다.
 
   describe "guard_value/4 — node integration" do
     test "redact updates the state field" do
