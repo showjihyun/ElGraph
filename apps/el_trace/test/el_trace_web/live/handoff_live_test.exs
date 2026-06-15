@@ -24,6 +24,11 @@ defmodule ElTraceWeb.HandoffLiveTest do
     assert html =~ "researcher"
     assert html =~ "summarizer"
     assert html =~ "research.done"
+    # 서버사이드 SVG 그래프가 인라인 렌더된다
+    assert html =~ "<svg"
+    assert html =~ "<marker"
+    assert html =~ "class=\"edge\""
+    # Graphviz DOT 소스도 함께
     assert html =~ "digraph"
     assert html =~ "-&gt;" or html =~ "->"
   end

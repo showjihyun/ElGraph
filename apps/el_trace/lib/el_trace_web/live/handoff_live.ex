@@ -1,7 +1,7 @@
 defmodule ElTraceWeb.HandoffLive do
   @moduledoc """
   멀티 에이전트 핸드오프 그래프 UI — "누가 어떤 시그널로 누구에게 넘겼는가"를
-  엣지 표와 Graphviz DOT 소스로 보여준다.
+  서버사이드 SVG 그래프(JS 의존 0) + 엣지 표 + Graphviz DOT 소스로 보여준다.
 
   앱이 띄운 싱글턴 컬렉터(`ElTrace.handoff_graph/0`)에서 그래프를 읽는다.
   실시간 갱신: connected?면 2초마다 self()에 `:refresh`를 보내 다시 읽는다
@@ -35,7 +35,12 @@ defmodule ElTraceWeb.HandoffLive do
     graph = ElTrace.handoff_graph()
 
     socket
-    |> assign(nodes: graph.nodes, edges: graph.edges, dot: Handoff.to_dot(graph))
+    |> assign(
+      nodes: graph.nodes,
+      edges: graph.edges,
+      svg: Handoff.to_svg(graph),
+      dot: Handoff.to_dot(graph)
+    )
   end
 
   @impl true
@@ -45,6 +50,8 @@ defmodule ElTraceWeb.HandoffLive do
     <p class="subtitle">멀티 에이전트 핸드오프 그래프 · 에이전트 <%= length(@nodes) %> · 핸드오프 <%= length(@edges) %></p>
 
     <button class="btn" phx-click="refresh">Refresh</button>
+
+    <div :if={@edges != []} class="handoff-graph"><%= raw(@svg) %></div>
 
     <table class="handoff">
       <thead>
