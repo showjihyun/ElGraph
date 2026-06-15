@@ -28,7 +28,14 @@
 - **#3 통합 검증 인프라** ✅ — `docker-compose.yml`(Postgres+Valkey, healthcheck)로 로컬 ecto/redis 스위트 실행 가능, 키프리 통합(langfuse_pipeline/sandbox)은 CI 기본 실행.
 - **#4 보안** ✅ — el_graph_web에 API키 인증 plug + 입력 가드레일(차단 시 graph 미실행).
 
-남은 (낮은 우선순위): OTel의 Agent/Bus/checkpoint span 미계측, Anthropic/Gemini 실 SSE 스트리밍 통합 테스트 부재, CHANGELOG/버전 부재, magentic ledger 단순.
+### 낮은 우선순위 항목도 폐쇄 (2026-06-15)
+
+- ✅ OTel **Agent/Bus/checkpoint 계측** — `[:el_graph, :agent, :start|:stop]`·`[:el_graph, :bus, :publish]`·`[:el_graph, :checkpoint, :put]` telemetry + `invoke_agent` semconv 매핑.
+- ✅ **Anthropic/Gemini 실 SSE 통합 테스트** — chat + stream_chat(@integration, 키 게이트, OpenAI와 동치).
+- ✅ **CHANGELOG + 버전** — `CHANGELOG.md`(0.2.0), 움브렐라+5앱 0.1.0→0.2.0.
+- ✅ **magentic ledger** — task + 누적 facts + stall guard(magentic-one 진행 인식).
+
+종합 스위트: el_graph 422 · el_graph_web 42 · el_trace 29 · el_graph_ecto 1 = **494 runnable 그린**, 5앱 Dialyzer 0.
 
 ## 차원별 개선 액션
 
