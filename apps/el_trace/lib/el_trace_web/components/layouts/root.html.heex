@@ -6,6 +6,16 @@
     <meta name="csrf-token" content={get_csrf_token()} />
     <title>ElTrace</title>
     <link phx-track-static rel="stylesheet" href={~p"/assets/app.css"} />
+    <%!-- viz.js (Graphviz/WASM, CDN). 핸드오프 그래프 클라이언트 렌더용 — 로드 실패/미가용 시
+         서버사이드 SVG로 폴백한다. SRI(integrity) 핀 + crossorigin으로 CDN 변조를 막는다.
+         오프라인/엄격 환경에서는 이 파일을 priv/static에 vendoring 후 same-origin src로 교체 권장. --%>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/@viz-js/viz@3.7.0/lib/viz-standalone.js"
+      integrity="sha256-AIIT7SWRaKLl666R065PK30ipOx+fiiLPIFnDC713Fk="
+      crossorigin="anonymous"
+    >
+    </script>
     <script defer phx-track-static type="text/javascript" src={~p"/assets/app.js"}>
     </script>
   </head>

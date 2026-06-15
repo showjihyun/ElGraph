@@ -51,7 +51,13 @@ defmodule ElTraceWeb.HandoffLive do
 
     <button class="btn" phx-click="refresh">Refresh</button>
 
-    <div :if={@edges != []} class="handoff-graph"><%= raw(@svg) %></div>
+    <%!-- viz.js(클라이언트 Graphviz)가 있으면 DOT을 SVG로 렌더해 #handoff-server-svg를 숨긴다.
+         없으면 아래 서버사이드 SVG가 그대로 보인다(JS/외부 의존 0 폴백). --%>
+    <div :if={@edges != []} id="handoff-viz" phx-hook="DotGraph" data-dot={@dot} data-fallback="handoff-server-svg">
+      <div id="handoff-viz-target" data-viz-target phx-update="ignore"></div>
+    </div>
+
+    <div :if={@edges != []} id="handoff-server-svg" class="handoff-graph"><%= raw(@svg) %></div>
 
     <table class="handoff">
       <thead>
