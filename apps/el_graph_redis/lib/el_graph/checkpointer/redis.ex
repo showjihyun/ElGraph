@@ -3,7 +3,10 @@ defmodule ElGraph.Checkpointer.Redis do
   Redis/**Valkey** 기반 내구 체크포인터 (`ElGraph.Checkpointer` 어댑터, Redix 사용).
 
   메모리 DB지만 RDB/AOF 영속화를 켜면 재시작을 넘어 체크포인트가 보존된다 — 빠른 읽기/쓰기와
-  내구성을 함께 얻는 선택지. Valkey(=Redis 포크, RESP 호환)와 Redis 모두 동작한다.
+  내구성을 함께 얻는 선택지. **Valkey(=Redis 7.2 포크)와 Redis 모두 동작한다** — 쓰는 명령이
+  `GET/SET/DEL/ZADD/ZRANGE/ZREM`(보편 핵심 RESP) 뿐이고 범용 Redix 클라이언트로 호출하므로
+  Valkey-특화 코드가 없다. 테스트는 `REDIS_HOST`/`REDIS_PORT`를 Valkey 인스턴스로 가리키면
+  동일 `:redis` 스위트가 Valkey를 검증한다(test_helper가 연결된 백엔드를 출력).
 
       {:ok, conn} = Redix.start_link(host: "localhost", port: 6379, name: :el_graph_redix)
       cp = {ElGraph.Checkpointer.Redis, ElGraph.Checkpointer.Redis.config(:el_graph_redix)}
