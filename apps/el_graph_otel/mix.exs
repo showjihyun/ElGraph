@@ -44,6 +44,9 @@ defmodule ElGraphOtel.MixProject do
       {:opentelemetry, "~> 1.5"},
       {:opentelemetry_exporter, "~> 1.8"},
       {:opentelemetry_telemetry, "~> 1.1"},
+      # OTLP 송신 종단 검증용 로컬 스텁 서버 (langfuse_export_test). 테스트 전용.
+      {:plug, "~> 1.16", only: :test},
+      {:bandit, "~> 1.5", only: :test},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
   end

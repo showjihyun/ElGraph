@@ -53,7 +53,7 @@ jobs:
       # 네트워크/인프라/키가 필요 없는 통합 테스트를 명시적으로 실행.
       - name: Run key-free integration tests (el_graph_otel)
         working-directory: apps/el_graph_otel
-        run: mix test test/el_graph/otel/langfuse_pipeline_test.exs --include integration
+        run: mix test test/el_graph/otel/langfuse_pipeline_test.exs test/el_graph/otel/langfuse_export_test.exs --include integration
 
       - name: Run key-free integration tests (el_graph sandbox)
         working-directory: apps/el_graph
