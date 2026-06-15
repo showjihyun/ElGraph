@@ -14,5 +14,6 @@ defmodule ElTraceWeb.Router do
     pipe_through(:browser)
 
     live("/", TimelineLive, :index)
+    live("/handoff", HandoffLive, :index)
   end
 end
