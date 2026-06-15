@@ -16,7 +16,7 @@
 | 7 | 문서화 | 0.08 | 9.3 | SPEC §14 표 + 모듈 moduledoc(예시 포함) + 체크리스트 + 본 루브릭 |
 | 8 | 안전/에러 처리 | 0.08 | 9.6 | 가드레일(PII/스키마/인가) + **ReAct 입출력 가드 연동 + el_graph_web API키 인증·입력 가드레일**, 샌드박스 격리+타임아웃(누수無)+Docker, 스트리밍 에러 매핑, eval 크래시→실패 |
 | 9 | 아키텍처 적합성 | 0.05 | 9.7 | 전부 격리 신규 모듈/앱, 코어 런타임 의존 불변, "라이브러리는 서버 자동기동 안 함" 원칙 준수(`server_spec/1`) |
-| 10 | 품질 게이트 | 0.03 | 9.9 | `mix format`·`async`·`@spec`·doctest(AGUI)·Dialyzer 0(5앱) ✅ + **CI(GitHub Actions)로 format/test/dialyzer 자동 강제** + docker-compose 통합 인프라 |
+| 10 | 품질 게이트 | 0.03 | 9.9 | `mix format`·`async`·`@spec`·doctest(AGUI)·Dialyzer 0(6앱) ✅ + **CI(GitHub Actions)로 format/test/dialyzer 자동 강제** + docker-compose 통합 인프라 |
 
 **종합(가중 평균): 9.53 / 10**
 
@@ -32,18 +32,18 @@
 
 - ✅ OTel **Agent/Bus/checkpoint 계측** — `[:el_graph, :agent, :start|:stop]`·`[:el_graph, :bus, :publish]`·`[:el_graph, :checkpoint, :put]` telemetry + `invoke_agent` semconv 매핑.
 - ✅ **Anthropic/Gemini 실 SSE 통합 테스트** — chat + stream_chat(@integration, 키 게이트, OpenAI와 동치).
-- ✅ **CHANGELOG + 버전** — `CHANGELOG.md`(0.2.0), 움브렐라+5앱 0.1.0→0.2.0.
+- ✅ **CHANGELOG + 버전** — `CHANGELOG.md`(0.2.0), 움브렐라+앱 전체 0.1.0→0.2.0.
 - ✅ **magentic ledger** — task + 누적 facts + stall guard(magentic-one 진행 인식).
 
-종합 스위트: el_graph 422 · el_graph_web 42 · el_trace 29 · el_graph_ecto 1 = **494 runnable 그린**, 5앱 Dialyzer 0.
+종합 스위트: el_graph 422 · el_graph_web 42 · el_trace 29 · el_graph_ecto 1 = **494 runnable 그린**, 6앱 Dialyzer 0.
 
 ## 차원별 개선 액션
 
 - **품질 게이트(8.5→9.2)** — 개선 완료:
   - ✅ [완료] 핵심 순수 모듈(`ElGraph.AGUI`)에 실행 가능한 doctest 3건 추가 → 문서가 거짓말하지 않음을 컴파일타임 보장.
-  - ✅ [완료] Dialyzer 도입 — 움브렐라 5개 앱 전부 0경고(el_graph·el_graph_web·el_trace·el_graph_ecto·el_graph_redis). 실버그 수정(mfa()→mfargs(), Telemetry.attach/0 계약).
+  - ✅ [완료] Dialyzer 도입 — 움브렐라 6개 앱 전부 0경고(el_graph·el_graph_web·el_trace·el_graph_ecto·el_graph_redis). 실버그 수정(mfa()→mfargs(), Telemetry.attach/0 계약).
 - **통합/E2E(9.3)** — ✅ [완료] Anthropic/Gemini 증분 도구호출 스트리밍 동치화(3개 어댑터 전체 stream_step/3).
-- **문서화(9.3)** — `el_graph_web`의 README/사용 예시 보강 여지(현재 moduledoc 중심).
+- **문서화(9.3→9.5)** — ✅ el_graph_web README 보강 완료(엔드포인트/옵션/curl). ✅ ElTrace #3 핸드오프 LiveView(/handoff) + #3 데이터/렌더 완성. ✅ OTel SDK를 `el_graph_otel` 앱으로 분리(코어 의존 축소).
 
 ## 검증 명령
 
@@ -53,6 +53,6 @@ mix test
 # 통합(실 OpenAI/Langfuse 파이프라인/샌드박스)
 cd apps/el_graph && mix test --only integration
 # 관측 연계
-cd apps/el_graph && mix test test/el_graph/otel/langfuse_pipeline_test.exs --only integration
+cd apps/el_graph_otel && mix test test/el_graph/otel/langfuse_pipeline_test.exs --only integration
 cd apps/el_trace && mix test test/el_trace/new_features_integration_test.exs
 ```

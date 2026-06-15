@@ -50,10 +50,14 @@ jobs:
       - name: Run tests (default — :integration excluded)
         run: mix test
 
-      # 네트워크/인프라/키가 필요 없는 통합 테스트 두 건을 명시적으로 실행.
-      - name: Run key-free integration tests
+      # 네트워크/인프라/키가 필요 없는 통합 테스트를 명시적으로 실행.
+      - name: Run key-free integration tests (el_graph_otel)
+        working-directory: apps/el_graph_otel
+        run: mix test test/el_graph/otel/langfuse_pipeline_test.exs --include integration
+
+      - name: Run key-free integration tests (el_graph sandbox)
         working-directory: apps/el_graph
-        run: mix test test/el_graph/otel/langfuse_pipeline_test.exs test/el_graph/sandbox/command_integration_test.exs --include integration
+        run: mix test test/el_graph/sandbox/command_integration_test.exs --include integration
 
   # Dialyzer 정적 분석 — 앱별로 PLT를 구성. PLT는 _build에 캐시.
   dialyzer:
@@ -87,7 +91,7 @@ jobs:
       - name: Run Dialyzer per app
         run: |
           set -e
-          for app in el_graph el_graph_web el_trace el_graph_ecto el_graph_redis; do
+          for app in el_graph el_graph_otel el_graph_web el_trace el_graph_ecto el_graph_redis; do
             echo "::group::dialyzer $app"
             (cd "apps/$app" && mix dialyzer)
             echo "::endgroup::"

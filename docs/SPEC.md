@@ -265,8 +265,8 @@ end
 
 ## 10. 품질 게이트
 
-- 모든 공개 API에 `@spec` + Dialyzer 통과. **Dialyzer 도입 완료(2026-06) — 움브렐라 5개 앱 전부**
-  (`el_graph`·`el_graph_web`·`el_trace`·`el_graph_ecto`·`el_graph_redis`)에 dialyxir +
+- 모든 공개 API에 `@spec` + Dialyzer 통과. **Dialyzer 도입 완료(2026-06) — 움브렐라 6개 앱 전부**
+  (`el_graph`·`el_graph_web`·`el_trace`·`el_graph_ecto`·`el_graph_redis`·`el_graph_otel`)에 dialyxir +
   `dialyzer:`(flags: error_handling/missing_return) 설정, 각 `mix dialyzer` **0 경고**. 도입 중 실타입
   버그 발견·수정: 노드/라우터/reducer 타입이 `mfa()`(=arity)로 잘못 선언돼 있던 것을
   `Graph.mfargs()`(`{module, fun, [args]}`)로 정정; `ElTrace.Telemetry.attach/0` 반환 계약을 `:ok`로
@@ -315,7 +315,7 @@ SPEC 본문은 설계 시점 표기를 유지한다. 실제 구현이 본문과 
 
 **실행 이벤트 계측 (2026-06-14)**: `:telemetry.execute`로 단발 이벤트 — `[:el_graph, :node, :retry]`(메타: node/step/thread_id/reason/attempt), `[:el_graph, :node, :interrupt]`(동적 인터럽트, 메타: node/step/thread_id/payload). span(invoke/node/llm.chat)과 함께 운영 관측의 토대. 잔여 계측: checkpoint 저장 이벤트, Agent/Bus/Sensor 레벨, 정적 인터럽트.
 
-**OTel 브리지 + Langfuse (2026-06-14)**: `ElGraph.OTel.Bridge` — telemetry span을 OpenTelemetry span으로 변환(`opentelemetry_telemetry`로 부모-자식 컨텍스트 관리, 속성은 `OTel.Mapping`의 GenAI semconv). `langfuse_otlp_config/3`이 Langfuse OTLP/HTTP exporter 설정(Basic auth + `x-langfuse-ingestion-version`)을 생성. **방침 확정**: Langfuse를 재구현하지 않고 OTLP 표준으로 연동 — 같은 OTel span이 Langfuse/Datadog/Jaeger 등 어느 백엔드로든 흐른다. **OTel 의존성**(opentelemetry/exporter/telemetry)을 in-repo 추가(Windows 컴파일 확인), 향후 `el_graph_otel`로 분리 — 코어 "telemetry 1개" 원칙은 그때 복원. ~~한계: 병렬 노드(별도 Task)는 OTel 컨텍스트 자동 전파 안 됨(1차).~~ → **해소**: `Executor.exec_all`이 부모 OTel 컨텍스트를 캡처해 각 Task에서 `attach`하므로 병렬 노드 span이 invoke span 아래로 중첩된다(OTel 미사용 시 무비용). **실전송 검증 완료(2026-06-14)**: Langfuse self-host(docker-compose + headless init)로 `scripts/otel_langfuse.exs` 실행 → trace 1개 + observation 6개 도착. Langfuse가 `chat gpt-4o`를 GENERATION(model·토큰 정확), 노드를 TOOL, invoke를 SPAN으로 정확히 분류 — GenAI semconv 매핑이 실데이터로 검증됨. ReAct 루프(agent→tools→agent)가 중첩 trace로 표시.
+**OTel 브리지 + Langfuse (2026-06-14)**: `ElGraph.OTel.Bridge` — telemetry span을 OpenTelemetry span으로 변환(`opentelemetry_telemetry`로 부모-자식 컨텍스트 관리, 속성은 `OTel.Mapping`의 GenAI semconv). `langfuse_otlp_config/3`이 Langfuse OTLP/HTTP exporter 설정(Basic auth + `x-langfuse-ingestion-version`)을 생성. **방침 확정**: Langfuse를 재구현하지 않고 OTLP 표준으로 연동 — 같은 OTel span이 Langfuse/Datadog/Jaeger 등 어느 백엔드로든 흐른다. **OTel SDK 분리 완료(2026-06-15)**: `ElGraph.OTel.Bridge`(+exporter/telemetry SDK 의존, langfuse 스크립트/테스트)를 별도 앱 **`el_graph_otel`**로 이동. 코어 el_graph는 무거운 SDK 3종(opentelemetry/exporter/telemetry)을 제거하고 **`telemetry` + `opentelemetry_api`(api-only, 컨텍스트 전파용)** 2개만 보유 — 무거운 SDK·exporter는 호스트가 el_graph_otel을 마운트할 때만 들어온다. 순수 매핑 `ElGraph.OTel.Mapping`은 코어 잔류. ~~한계: 병렬 노드(별도 Task)는 OTel 컨텍스트 자동 전파 안 됨(1차).~~ → **해소**: `Executor.exec_all`이 부모 OTel 컨텍스트를 캡처해 각 Task에서 `attach`하므로 병렬 노드 span이 invoke span 아래로 중첩된다(OTel 미사용 시 무비용). **실전송 검증 완료(2026-06-14)**: Langfuse self-host(docker-compose + headless init)로 `scripts/otel_langfuse.exs` 실행 → trace 1개 + observation 6개 도착. Langfuse가 `chat gpt-4o`를 GENERATION(model·토큰 정확), 노드를 TOOL, invoke를 SPAN으로 정확히 분류 — GenAI semconv 매핑이 실데이터로 검증됨. ReAct 루프(agent→tools→agent)가 중첩 trace로 표시.
 
 **ElTrace 프로토타입 착수 (2026-06-14)**: Langfuse 관찰(도그푸딩 세션 8) 결과 "ElGraph가 체크포인트·버스로 아는 인과를 Langfuse는 모른다"는 4개 차별점을 데이터로 확정 — #1 인터럽트 가시성, #2 thread 생애(invoke→interrupt→resume), #3 멀티 에이전트 핸드오프, #4 time-travel 재개. 우선순위 #1·#2를 구현: `ElTrace.Timeline`(체크포인트 체인 → 생애 타임라인 + 텍스트 렌더). 선결로 `Checkpoint.interrupt_info`(node+payload)를 추가 — 동적 인터럽트가 기록하고 재개 후에도 보존(Langfuse가 못 보여준 "왜 멈췄나"의 데이터 소스). 시연: `scripts/eltrace_demo.exs`. **방침**: ElTrace는 범용 trace(span/토큰)를 재구현하지 않고 Langfuse에 위임 — 체크포인트가 아는 인과만 다룬다. **구조**: `lib/el_trace/`에 두되 ElGraph 의존은 Checkpointer behaviour뿐 — 별도 앱(`el_trace`) 분리에 유리.
 
