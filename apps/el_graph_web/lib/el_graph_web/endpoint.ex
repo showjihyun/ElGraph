@@ -10,15 +10,19 @@ defmodule ElGraphWeb.Endpoint do
   def init(opts) do
     %{
       agents: Map.new(Keyword.get(opts, :agents, %{})),
-      task_store: Keyword.get(opts, :task_store)
+      task_store: Keyword.get(opts, :task_store),
+      api_keys: Keyword.get(opts, :api_keys, []),
+      guardrails: Keyword.get(opts, :guardrails, [])
     }
   end
 
   @impl true
-  def call(conn, %{agents: agents, task_store: task_store}) do
+  def call(conn, %{agents: agents, task_store: task_store} = opts) do
     conn
     |> Plug.Conn.assign(:agents, agents)
     |> Plug.Conn.assign(:task_store, task_store)
+    |> Plug.Conn.assign(:api_keys, opts.api_keys)
+    |> Plug.Conn.assign(:guardrails, opts.guardrails)
     |> ElGraphWeb.Router.call(ElGraphWeb.Router.init([]))
   end
 end

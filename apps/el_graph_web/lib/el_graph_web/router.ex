@@ -8,6 +8,7 @@ defmodule ElGraphWeb.Router do
 
   use Plug.Router
 
+  plug(ElGraphWeb.Auth)
   plug(:match)
   plug(:dispatch)
 

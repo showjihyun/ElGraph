@@ -10,6 +10,7 @@ defmodule ElGraphWeb.AGUI.Router do
 
   use Plug.Router
 
+  alias ElGraphWeb.Guardrails
   alias ElGraphWeb.SSE
 
   plug(Plug.Parsers, parsers: [:json], json_decoder: Jason, pass: ["application/json"])
@@ -29,6 +30,16 @@ defmodule ElGraphWeb.AGUI.Router do
 
   defp stream_run(conn, spec) do
     input = atomize_input(conn.body_params)
+
+    case Guardrails.check(conn, input[:question]) do
+      {:ok, _} -> run_stream(conn, spec, input)
+      {:blocked, reason} -> send_json(conn, 403, blocked_body(reason))
+    end
+  end
+
+  defp blocked_body(reason), do: %{"error" => "guardrail_blocked", "reason" => inspect(reason)}
+
+  defp run_stream(conn, spec, input) do
     run_id = "run-" <> Integer.to_string(System.unique_integer([:positive]))
     thread_id = Map.get(input, :thread_id, run_id)
 

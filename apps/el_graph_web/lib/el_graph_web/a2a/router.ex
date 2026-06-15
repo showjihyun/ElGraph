@@ -18,6 +18,7 @@ defmodule ElGraphWeb.A2A.Router do
   use Plug.Router
 
   alias ElGraphWeb.A2A.JSONRPC
+  alias ElGraphWeb.Guardrails
   alias ElGraphWeb.SSE
 
   plug(Plug.Parsers, parsers: [:json], json_decoder: Jason, pass: ["application/json"])
@@ -36,8 +37,15 @@ defmodule ElGraphWeb.A2A.Router do
     case agent(conn, name) do
       {:ok, spec} ->
         input = ElGraph.A2A.message_to_input(conn.body_params)
-        task = ElGraph.A2A.to_task_state(ElGraph.invoke(spec.graph, input))
-        send_json(conn, 200, task)
+
+        case Guardrails.check(conn, input.question) do
+          {:ok, _} ->
+            task = ElGraph.A2A.to_task_state(ElGraph.invoke(spec.graph, input))
+            send_json(conn, 200, task)
+
+          {:blocked, reason} ->
+            send_json(conn, 403, %{"error" => "guardrail_blocked", "reason" => inspect(reason)})
+        end
 
       :error ->
         send_json(conn, 404, %{"error" => "unknown agent", "name" => name})
@@ -65,9 +73,36 @@ defmodule ElGraphWeb.A2A.Router do
   defp dispatch_rpc(conn, spec) do
     body = conn.body_params
     id = Map.get(body, "id")
+    params = Map.get(body, "params", %{})
     deps = %{graph: spec.graph, task_store: conn.assigns[:task_store]}
 
-    case JSONRPC.handle(Map.get(body, "method"), Map.get(body, "params", %{}), deps) do
+    case guard_rpc(conn, params) do
+      {:blocked, reason} ->
+        send_json(conn, 200, envelope(id, error: guardrail_error(reason)))
+
+      :ok ->
+        dispatch_rpc(conn, id, Map.get(body, "method"), params, deps)
+    end
+  end
+
+  # message가 있는 메서드(message/send, message/stream)의 텍스트를 입력 가드로 검사한다.
+  defp guard_rpc(conn, %{"message" => message}) do
+    %{question: text} = ElGraph.A2A.message_to_input(message)
+
+    case Guardrails.check(conn, text) do
+      {:ok, _} -> :ok
+      blocked -> blocked
+    end
+  end
+
+  defp guard_rpc(_conn, _params), do: :ok
+
+  defp guardrail_error(reason) do
+    %{"code" => -32602, "message" => "Invalid params: guardrail blocked (#{inspect(reason)})"}
+  end
+
+  defp dispatch_rpc(conn, id, method, params, deps) do
+    case JSONRPC.handle(method, params, deps) do
       {:result, result} ->
         send_json(conn, 200, envelope(id, result: result))
 
