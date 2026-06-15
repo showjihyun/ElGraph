@@ -524,8 +524,14 @@ defmodule ElGraph.Executor do
 
   defp persist_for_interrupt(_meta, _step, _state, _next), do: :ok
 
-  defp do_put(%{checkpointer: {mod, config}} = meta, step, state, next),
-    do: mod.put(config, checkpoint(meta, step, state, next))
+  defp do_put(%{checkpointer: {mod, config}} = meta, step, state, next) do
+    :telemetry.execute([:el_graph, :checkpoint, :put], %{}, %{
+      thread_id: meta.thread_id,
+      step: step
+    })
+
+    mod.put(config, checkpoint(meta, step, state, next))
+  end
 
   defp checkpoint(%{thread_id: thread_id}, step, state, next),
     do: %Checkpoint{thread_id: thread_id, step: step, state: state, next: next}

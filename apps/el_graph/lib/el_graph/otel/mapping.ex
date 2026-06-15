@@ -41,6 +41,18 @@ defmodule ElGraph.OTel.Mapping do
     {"execute_tool #{tool_name}", attrs}
   end
 
+  # 에이전트 실행 (L3) → invoke_agent (SPEC §3.7). agent 이벤트가 span으로 브리지될 때.
+  def span([:el_graph, :agent], metadata) do
+    attrs =
+      %{
+        "gen_ai.operation.name" => "invoke_agent",
+        "gen_ai.agent.name" => to_string(metadata.agent_id)
+      }
+      |> put_error(metadata)
+
+    {"invoke_agent", attrs}
+  end
+
   # LLM 호출 → GenAI chat generation. Langfuse 등이 'generation'으로 인식하는 핵심 span.
   def span([:el_graph, :llm, :chat], metadata) do
     base = %{

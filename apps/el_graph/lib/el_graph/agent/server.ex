@@ -88,12 +88,14 @@ defmodule ElGraph.Agent.Server do
   @impl GenServer
   def handle_info({:el_graph_run, pid, result}, %{run: %{pid: pid}} = state) do
     Process.demonitor(state.run.monitor_ref, [:flush])
+    emit_stop(state, run_status(result))
     state = remember_conversation(state, result)
     state.callback.handle_result(result, state.context)
     {:noreply, dequeue(%{state | run: nil})}
   end
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{run: %{monitor_ref: ref}} = state) do
+    emit_stop(state, :error)
     state.callback.handle_result({:error, {:run_down, reason}}, state.context)
     {:noreply, dequeue(%{state | run: nil})}
   end
@@ -102,12 +104,21 @@ defmodule ElGraph.Agent.Server do
 
   defp start_or_enqueue(%{run: nil} = state, input) do
     {:ok, run} = Runner.start_run(state.graph, input, run_opts_for(state))
+    :telemetry.execute([:el_graph, :agent, :start], %{}, %{agent_id: state.id})
     %{state | run: run}
   end
 
   defp start_or_enqueue(state, input) do
     %{state | queue: :queue.in(input, state.queue)}
   end
+
+  defp emit_stop(state, status) do
+    :telemetry.execute([:el_graph, :agent, :stop], %{}, %{agent_id: state.id, status: status})
+  end
+
+  defp run_status({:ok, _}), do: :ok
+  defp run_status({:interrupted, _}), do: :interrupted
+  defp run_status(_other), do: :error
 
   defp dequeue(state) do
     case :queue.out(state.queue) do

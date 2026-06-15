@@ -59,11 +59,22 @@ defmodule ElGraph.Signal.Bus do
   def publish(bus, %Signal{type: type} = signal) do
     if Pg.started?(bus) do
       Pg.publish(bus, signal)
+
+      :telemetry.execute([:el_graph, :bus, :publish], %{subscribers: 0}, %{
+        type: type,
+        transport: :pg
+      })
     else
-      for {pid, {pattern, target}} <- Registry.lookup(bus, :subscribers),
-          Signal.matches?(pattern, type) do
-        dispatch(pid, target, signal)
-      end
+      matched =
+        for {pid, {pattern, target}} <- Registry.lookup(bus, :subscribers),
+            Signal.matches?(pattern, type) do
+          dispatch(pid, target, signal)
+        end
+
+      :telemetry.execute([:el_graph, :bus, :publish], %{subscribers: length(matched)}, %{
+        type: type,
+        transport: :local
+      })
     end
 
     :ok

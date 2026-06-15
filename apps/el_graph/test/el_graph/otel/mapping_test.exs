@@ -40,6 +40,14 @@ defmodule ElGraph.OTel.MappingTest do
                })
     end
 
+    test "agent spans map to invoke_agent with the agent name" do
+      assert {"invoke_agent",
+              %{
+                "gen_ai.operation.name" => "invoke_agent",
+                "gen_ai.agent.name" => "a1"
+              }} = Mapping.span([:el_graph, :agent], %{agent_id: "a1"})
+    end
+
     test "llm.chat error spans carry error.type" do
       assert {"chat gpt-4o", %{"error.type" => _}} =
                Mapping.span([:el_graph, :llm, :chat], %{
