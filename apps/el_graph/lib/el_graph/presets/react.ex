@@ -10,16 +10,20 @@ defmodule ElGraph.Presets.ReAct do
   LLM 호출 실패만 `ElGraph.LLMError`로 노드를 crash시킨다 — `retry:` 정책과 결합 지점.
   """
 
-  alias ElGraph.{Action, Ctx, LLM, LLMError, RateLimiter, Reducers}
+  alias ElGraph.{Action, Ctx, Guardrail, LLM, LLMError, RateLimiter, Reducers}
   alias ElGraph.MCP.Tool, as: MCPTool
 
   @doc false
   def build(llm, tools, opts) do
+    guardrails = Keyword.get(opts, :guardrails, [])
+
     agent_cfg = %{
       llm: llm,
       tools: tools,
       system: Keyword.get(opts, :system),
-      rate_limiter: Keyword.get(opts, :rate_limiter)
+      rate_limiter: Keyword.get(opts, :rate_limiter),
+      input_guards: Keyword.get(guardrails, :input, []),
+      output_guards: Keyword.get(guardrails, :output, [])
     }
 
     ElGraph.new()
@@ -47,15 +51,58 @@ defmodule ElGraph.Presets.ReAct do
       [tools: Enum.map(cfg.tools, &tool_spec/1)] ++
         if cfg.system, do: [system: cfg.system], else: []
 
-    # 마찰 6: 모든 LLM 호출은 rate_limiter를 통과한다 (지정 시).
-    case call_llm(cfg.rate_limiter, llm_mod, llm_config, messages, chat_opts) do
-      {:ok, %{message: message} = response} ->
-        Map.merge(%{messages: [message], usage: Map.get(response, :usage)}, budget_update)
+    # 입력 가드: LLM 호출 *이전*. 차단되면 호출하지 않고 거부 메시지로 루프를 끝낸다.
+    case guard_input(messages, cfg.input_guards) do
+      {:ok, guarded_messages} ->
+        # 마찰 6: 모든 LLM 호출은 rate_limiter를 통과한다 (지정 시).
+        case call_llm(cfg.rate_limiter, llm_mod, llm_config, guarded_messages, chat_opts) do
+          {:ok, %{message: message} = response} ->
+            guarded = guard_output(message, cfg.output_guards)
+            Map.merge(%{messages: [guarded], usage: Map.get(response, :usage)}, budget_update)
 
-      {:error, reason} ->
-        raise LLMError, reason: reason
+          {:error, reason} ->
+            raise LLMError, reason: reason
+        end
+
+      {:blocked, reason} ->
+        Map.merge(%{messages: [blocked_message(reason)]}, budget_update)
     end
   end
+
+  # 마지막 user 메시지의 binary content에만 입력 가드를 적용한다.
+  defp guard_input(messages, []), do: {:ok, messages}
+
+  defp guard_input(messages, guards) do
+    case List.last(messages) do
+      %{role: :user, content: content} = last when is_binary(content) ->
+        case Guardrail.check(guards, content, %{}) do
+          {:ok, ^content} -> {:ok, messages}
+          {:ok, transformed} -> {:ok, replace_last(messages, %{last | content: transformed})}
+          {:blocked, reason} -> {:blocked, reason}
+        end
+
+      _other ->
+        {:ok, messages}
+    end
+  end
+
+  # assistant 메시지의 binary content에 출력 가드를 적용한다.
+  defp guard_output(message, []), do: message
+
+  defp guard_output(%{content: content} = message, guards) when is_binary(content) do
+    case Guardrail.check(guards, content, %{}) do
+      {:ok, transformed} -> %{message | content: transformed}
+      # tool_calls를 떨궈 route/1이 루프를 안전하게 끝내게 한다.
+      {:blocked, reason} -> blocked_message(reason)
+    end
+  end
+
+  defp guard_output(message, _guards), do: message
+
+  defp blocked_message(reason), do: LLM.assistant("[blocked: #{inspect(reason)}]")
+
+  defp replace_last(messages, new_last),
+    do: List.replace_at(messages, length(messages) - 1, new_last)
 
   defp call_llm(nil, mod, config, messages, opts), do: mod.chat(config, messages, opts)
 
