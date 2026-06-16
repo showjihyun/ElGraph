@@ -113,3 +113,20 @@
 
 **최종 스위트**: el_graph 400 + el_graph_web 28 + el_trace 27 = **455 passed**, 회귀 0.
 서브에이전트 6회 활용(전부 strict scope 준수, 결과는 직접 전체 스위트로 검증).
+
+---
+
+## 후속 심화 (체크리스트 9.5 이후, 2026-06-16)
+
+T2.6 메모리를 보고서 야심(temporal·외부 메모리 흡수·영속)까지 확장. 전부 TDD.
+
+- **네이티브 temporal/conflict** (`ElGraph.Memory`): `fact_at/4`(시점 T 유효값),
+  `set_fact ... on_conflict: :latest|:reject|fun/2`. (+5 tests)
+- **교체형 백엔드** (`ElGraph.Memory.Backend`, remember/recall): `Backend.Native`(임베더, 의존 0)
+  + `Backend.Mem0`(REST, **실 키 round-trip 검증**) + `Backend.Zep`(temporal KG). 구조화
+  facts는 코어 전용 유지. (+13 단위 + Mem0/Zep :integration 2)
+- **Store 영속 어댑터**: `ElGraph.Store.Redis`(Valkey, el_graph_redis) +
+  `ElGraph.Store.Postgres`(el_graph_ecto). `StoreContract`를 lib로 승격 → ETS/Redis/Postgres
+  3백엔드가 동일 계약 통과 + Memory-over-DB 종단 테스트. (el_graph_redis +10, el_graph_ecto +10)
+
+스위트: el_graph 462 · el_graph_redis 25(@Valkey 8.1) · el_graph_ecto 26(@PG 17), 양쪽 Dialyzer 0.
