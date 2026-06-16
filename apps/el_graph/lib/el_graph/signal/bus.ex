@@ -54,9 +54,11 @@ defmodule ElGraph.Signal.Bus do
     :ok
   end
 
-  @doc "시그널을 매칭되는 모든 구독자에게 발행한다 (fan-out)."
+  @doc "시그널을 매칭되는 모든 구독자에게 발행한다 (fan-out). 전달 id를 fan-out 전에 한 번 스탬프한다."
   @spec publish(atom(), Signal.t()) :: :ok
-  def publish(bus, %Signal{type: type} = signal) do
+  def publish(bus, %Signal{} = signal) do
+    %Signal{type: type} = signal = Signal.ensure_id(signal)
+
     if Pg.started?(bus) do
       Pg.publish(bus, signal)
 

@@ -49,7 +49,8 @@ defmodule ElGraph.Agent.Server do
       conv_state: nil,
       context: %{id: Keyword.get(opts, :id), opts: opts},
       run: nil,
-      queue: :queue.new()
+      queue: :queue.new(),
+      dedup: init_dedup(Keyword.get(opts, :dedup))
     }
 
     {:ok, state, {:continue, :recover}}
@@ -74,9 +75,16 @@ defmodule ElGraph.Agent.Server do
 
   @impl GenServer
   def handle_cast({:signal, signal}, state) do
-    case state.callback.handle_signal(signal, state.context) do
-      :ignore -> {:noreply, state}
-      {:run, input} -> {:noreply, start_or_enqueue(state, input)}
+    case dedup_check(state, signal) do
+      {:duplicate, state} ->
+        # at-least-once 재전달(예: netsplit 회복) — 멱등하게 무시 (SPEC §6).
+        {:noreply, state}
+
+      {:new, state} ->
+        case state.callback.handle_signal(signal, state.context) do
+          :ignore -> {:noreply, state}
+          {:run, input} -> {:noreply, start_or_enqueue(state, input)}
+        end
     end
   end
 
@@ -145,6 +153,18 @@ defmodule ElGraph.Agent.Server do
   defp apply_thread_id(opts, _per_request), do: opts
 
   defp subscribe_to_bus(nil), do: :ok
+  # 멱등 수신 (SPEC §6): dedup: max 옵션이 주어지면 Signal.id로 재전달을 한 번만 처리.
+  defp init_dedup(nil), do: nil
+  defp init_dedup(max) when is_integer(max) and max > 0, do: ElGraph.Signal.Dedup.new(max)
+  defp init_dedup(true), do: ElGraph.Signal.Dedup.new()
+
+  defp dedup_check(%{dedup: nil} = state, _signal), do: {:new, state}
+
+  defp dedup_check(%{dedup: dedup} = state, %{id: id}) do
+    {result, dedup} = ElGraph.Signal.Dedup.put(dedup, id)
+    {result, %{state | dedup: dedup}}
+  end
+
   defp subscribe_to_bus({bus, pattern}), do: ElGraph.Signal.Bus.subscribe(bus, pattern)
 
   defp subscribe_to_bus(subscriptions) when is_list(subscriptions) do

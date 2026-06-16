@@ -53,9 +53,10 @@ defmodule ElGraph.Agent do
     end
   end
 
-  @doc "에이전트에 시그널을 보낸다 (비동기)."
+  @doc "에이전트에 시그널을 보낸다 (비동기). 멱등 수신을 위해 전달 id를 보장한다."
   @spec send_signal(GenServer.server(), Signal.t()) :: :ok
-  def send_signal(server, %Signal{} = signal), do: GenServer.cast(server, {:signal, signal})
+  def send_signal(server, %Signal{} = signal),
+    do: GenServer.cast(server, {:signal, Signal.ensure_id(signal)})
 
   @doc "에이전트 상태 요약: `%{id:, running:, queued:}` — 실행 중에도 응답한다."
   @spec status(GenServer.server()) :: %{id: term(), running: boolean(), queued: non_neg_integer()}
