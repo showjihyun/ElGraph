@@ -19,6 +19,14 @@ LLM 에이전트를 **상태 채널 + 노드 + 엣지**로 선언하면, ElGraph
 
 ---
 
+## 🤔 왜 ElGraph? (3줄 요약)
+
+1. **LLM 에이전트를 그래프로 선언** → ElGraph가 체크포인트 기반으로 실행한다.
+2. **멈추고(HITL)·되감고(time-travel)·죽어도 재개**한다 — 내구 실행이 기본값.
+3. **Python·외부 인프라 없이** BEAM 런타임이 동시성·장애복구·실시간을 공짜로 준다 (코어 런타임 의존성은 `:telemetry` 하나).
+
+> 한 줄: *LangGraph가 Python에서 라이브러리로 힘겹게 재구현한 것이, BEAM에선 런타임 기본이다.*
+
 ## ✨ 핵심 특징
 
 - **그래프 코어** — 상태 채널/reducer, 조건부 엣지, 병렬 fan-out, 서브그래프. 런타임 의존성은 `:telemetry` 하나.
@@ -100,10 +108,27 @@ mix phx.server
 
 ---
 
-## ⚖️ LangGraph vs ElGraph
+## ⚖️ LangChain · LangGraph vs ElGraph
 
 > 한 줄 요약: **LangGraph가 Python에서 "라이브러리로 재구현"해야 했던 것들이 BEAM에선 런타임 기본이다.**
 > 그래서 같은 기능을 *더 적은 코드·더 적은 인프라·더 강한 보장*으로 제공한다.
+
+### 한눈에 — LangChain · LangGraph · ElGraph
+
+> **계층이 다르다**: **LangChain**은 프롬프트·툴·RAG를 잇는 *조립 라이브러리*, **LangGraph**는 그 위에서 상태·내구 실행을 다루는 *그래프 상태머신* 계층(그래서 별도로 분리돼 나왔다). **ElGraph의 직접 비교 대상은 LangGraph**이고, BEAM 위라 LangGraph가 외부에 의존하던 것(실시간 UI·분산·자기치유)까지 런타임에 흡수한다.
+
+| | **LangChain** | **LangGraph** | **ElGraph** |
+|---|---|---|---|
+| 한마디 | LLM "조립" 라이브러리 | Python 그래프 상태머신 | **BEAM** 그래프 상태머신 |
+| 핵심 역할 | 프롬프트·툴·RAG 체인 | 내구 실행·HITL·체크포인트 | 〃 **+ 실시간 관측·분산** |
+| 실행 모델 | 체인/DAG (얕은 상태) | 그래프 + 채널/reducer | 그래프 + 채널/reducer |
+| 런타임 | Python (asyncio/GIL) | Python (asyncio/GIL) | BEAM (경량프로세스·선점·분산 내장) |
+| 내구 실행·재개 | ✖ (범위 밖) | ✔ 라이브러리로 재구현 | ✔ **런타임과 한 몸** |
+| HITL · time-travel | ✖ | ✔ HITL / 되감기 일부 | ✔ HITL **+ 과거 시점 분기(fork)** |
+| 장애 격리·자기치유 | 앱코드 + 외부 인프라 | 앱코드 + 외부 인프라 | **Supervisor·프로세스 격리(언어 표준)** |
+| 동시성 | GIL 제약 | GIL 제약 | **전 코어·수만 동시(설계변경 0)** |
+| 의존성·배포 | 전이 의존성 다수 | 전이 의존성 다수 | 코어 의존성 **사실상 0**(`:telemetry`만)·단일 릴리스 |
+| 실시간 UI | 별도 구성 | 별도 구성 | **LiveView 동일 모델**(ElTrace·인프라 0) |
 
 에이전트 오케스트레이터는 결국 **"수많은 동시 I/O 대기 + 상태 관리 + 장애 복구"** 문제다.
 이건 BEAM(Erlang/Elixir 런타임)이 30년간 통신 교환기에서 풀어온 바로 그 문제다.

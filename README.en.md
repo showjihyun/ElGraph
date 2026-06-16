@@ -19,6 +19,14 @@ user input ─▶ [run graph] ─▶ checkpoint after every step
 
 ---
 
+## 🤔 Why ElGraph? (3-line summary)
+
+1. **Declare your LLM agent as a graph** → ElGraph runs it on top of checkpoints.
+2. **Pause (HITL), rewind (time-travel), resume after a crash** — durable execution is the default.
+3. **No Python, no external infra** — the BEAM runtime gives you concurrency, fault recovery, and real-time for free (the only core runtime dependency is `:telemetry`).
+
+> One line: *what LangGraph had to laboriously reimplement as a library in Python is a runtime built-in on the BEAM.*
+
 ## ✨ Highlights
 
 - **Graph core** — state channels/reducers, conditional edges, parallel fan-out, subgraphs. Only one runtime dependency: `:telemetry`.
@@ -101,11 +109,28 @@ step to spin up a "what if I'd rejected?" scenario as a new thread.
 
 ---
 
-## ⚖️ LangGraph vs ElGraph
+## ⚖️ LangChain · LangGraph vs ElGraph
 
 > In one line: **what LangGraph had to "reimplement as a library" in Python is a runtime
 > built-in on the BEAM.** So you get the same capabilities with *less code, less
 > infrastructure, and stronger guarantees*.
+
+### At a glance — LangChain · LangGraph · ElGraph
+
+> **They live at different layers**: **LangChain** is an *assembly library* that wires prompts, tools, and RAG; **LangGraph** is the *graph state-machine* layer on top that handles state and durable execution (which is why it was split out). **ElGraph's direct counterpart is LangGraph** — and because it runs on the BEAM, it folds in what LangGraph leans on external systems for (real-time UI, distribution, self-healing).
+
+| | **LangChain** | **LangGraph** | **ElGraph** |
+|---|---|---|---|
+| In a word | LLM "assembly" library | Python graph state-machine | **BEAM** graph state-machine |
+| Core role | prompt·tool·RAG chains | durable exec·HITL·checkpoints | 〃 **+ real-time observability·distribution** |
+| Execution model | chain/DAG (shallow state) | graph + channels/reducers | graph + channels/reducers |
+| Runtime | Python (asyncio/GIL) | Python (asyncio/GIL) | BEAM (lightweight processes·preemption·built-in distribution) |
+| Durable exec·resume | ✖ (out of scope) | ✔ reimplemented as a library | ✔ **one with the runtime** |
+| HITL · time-travel | ✖ | ✔ HITL / partial rewind | ✔ HITL **+ fork from a past point** |
+| Fault isolation·self-healing | app code + external infra | app code + external infra | **Supervisor·process isolation (language standard)** |
+| Concurrency | GIL-bound | GIL-bound | **all cores·tens of thousands concurrent (zero redesign)** |
+| Dependencies·deploy | many transitive deps | many transitive deps | **effectively zero** core deps (`:telemetry` only)·single release |
+| Real-time UI | bolt-on | bolt-on | **same LiveView model** (ElTrace·zero infra) |
 
 An agent orchestrator is ultimately a problem of **"many concurrent I/O waits + state
 management + failure recovery."** That is exactly the problem the BEAM (the Erlang/Elixir
