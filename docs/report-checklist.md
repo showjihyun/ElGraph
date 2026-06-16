@@ -130,3 +130,14 @@ T2.6 메모리를 보고서 야심(temporal·외부 메모리 흡수·영속)까
   3백엔드가 동일 계약 통과 + Memory-over-DB 종단 테스트. (el_graph_redis +10, el_graph_ecto +10)
 
 스위트: el_graph 462 · el_graph_redis 25(@Valkey 8.1) · el_graph_ecto 26(@PG 17), 양쪽 Dialyzer 0.
+
+### 추가 (2026-06-17)
+
+- **관측 계측 마무리**: 정적 인터럽트 이벤트(`node.interrupt {kind: :static}`) + Sensor signal 이벤트
+  (`[:el_graph, :sensor, :signal]`) → SPEC §13 "잔여 계측" 전부 종료.
+- **task 메모이제이션**: `Ctx.memo/3` — LLM/툴 호출을 `{node, key}`로 캐시, 체크포인트 영속 →
+  재시도·재개 시 재실행 금지(durability+, Temporal Activity/@task).
+- **구조화 출력 재시도**: `ElGraph.LLM.Structured.generate/4` — LLM 출력 → NimbleOptions 검증 →
+  실패 시 오류 되먹임 재시도(Instructor/Pydantic AI 패턴, 외부 인프라 0).
+
+스위트: el_graph 474 passed, Dialyzer 0.

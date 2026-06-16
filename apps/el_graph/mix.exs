@@ -40,6 +40,7 @@ defmodule ElGraph.MixProject do
     [
       {:telemetry, "~> 1.3"},
       {:nimble_options, "~> 1.1"},
+      {:jason, "~> 1.4"},
       {:req, "~> 0.5"},
       # executor의 OTel 컨텍스트 전파용 API only — SDK/exporter/브리지는 `el_graph_otel`이 격리한다 (SPEC §13).
       {:opentelemetry_api, "~> 1.4"},
