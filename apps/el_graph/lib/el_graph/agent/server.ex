@@ -153,6 +153,12 @@ defmodule ElGraph.Agent.Server do
   defp apply_thread_id(opts, _per_request), do: opts
 
   defp subscribe_to_bus(nil), do: :ok
+  defp subscribe_to_bus({bus, pattern}), do: ElGraph.Signal.Bus.subscribe(bus, pattern)
+
+  defp subscribe_to_bus(subscriptions) when is_list(subscriptions) do
+    Enum.each(subscriptions, fn {bus, pattern} -> ElGraph.Signal.Bus.subscribe(bus, pattern) end)
+  end
+
   # 멱등 수신 (SPEC §6): dedup: max 옵션이 주어지면 Signal.id로 재전달을 한 번만 처리.
   defp init_dedup(nil), do: nil
   defp init_dedup(max) when is_integer(max) and max > 0, do: ElGraph.Signal.Dedup.new(max)
@@ -163,12 +169,6 @@ defmodule ElGraph.Agent.Server do
   defp dedup_check(%{dedup: dedup} = state, %{id: id}) do
     {result, dedup} = ElGraph.Signal.Dedup.put(dedup, id)
     {result, %{state | dedup: dedup}}
-  end
-
-  defp subscribe_to_bus({bus, pattern}), do: ElGraph.Signal.Bus.subscribe(bus, pattern)
-
-  defp subscribe_to_bus(subscriptions) when is_list(subscriptions) do
-    Enum.each(subscriptions, fn {bus, pattern} -> ElGraph.Signal.Bus.subscribe(bus, pattern) end)
   end
 
   # :registry는 에이전트 이름용이므로, 실행 introspection용 Registry는 :run_registry로 받아

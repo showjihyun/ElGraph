@@ -251,7 +251,7 @@ end
 | **M2 Action** ✅ 완료 (2026-06-12) | Action behaviour+스키마, LLM tool 스펙 생성, retry, MCP 어댑터, `:send`/`:command`/서브그래프 실행, ScriptedLLM(테스트 키트), LLM behaviour + Anthropic/OpenAI/Gemini 어댑터(우선 in-repo, hex 분리는 출시 시점 재평가 — SSE 스트리밍은 미구현), 체크포인트 보존 정책(`keep:`), 토큰/비용 예산 가드, `append_trim` reducer, ReAct 프리셋 | 충족: ReAct + map-reduce 예제가 테스트로 동작, 130 테스트 통과 |
 | **M3 Agent** ✅ 완료 (2026-06-13) | GenServer 에이전트(비블로킹 실행, 직렬 큐, crash-only 자동 재개), Signal+패턴 매칭, Registry 주소화/child_specs, rate limiter(모니터 기반 자동 회수), Runner introspection(list/peek), OTel GenAI **매핑 계층**(in-repo 순수 함수 — SDK 브리지는 OTel 전역 상태가 async 테스트 규율과 충돌해 `el_graph_otel` 패키지 몫으로 분리) | 충족: 도그푸딩 에이전트(`ElGraph.Demo` — 문서 Q&A, supervision 트리 + 실 OpenAI)가 실 API 통합 테스트로 동작 확인. 상시 구동: `mix run --no-halt scripts/demo.exs` |
 | **M4 Skill/Sensor/Store** ✅ 완료 (2026-06-13) | `SignalReAct` Skill(도그푸딩 2표본에서 4-파라미터 추출), `Sensor`(폴링+tick), `Signal.Bus`(패턴 구독+fan-out, 발견 8 해소), `Store`+`Store.ETS`(장기 메모리, 공유 계약), `Nodes.Summarize`(컨텍스트 압축 — append `{:replace}` 마커 + Store 축출) | 충족: DocsAgent·SummarizeAgent를 `use SignalReAct` 한 블록으로 재구성, 센서→버스→에이전트 체인·요약+Store 모두 실 OpenAI 검증 |
-| **M5 분산** 🔶 코어 완료 (2026-06-13) | 핸드오프(SignalReAct `:emit` → 버스 파이프라인), `:pg` 전송(Bus.Pg — Agent 구독 분산, 함수 구독 거부), A2A 매핑(`A2A` — Task 상태/Agent Card/Message 변환, 순수 함수) | 코어 충족: 2-에이전트 파이프라인·:pg fan-out 테스트 통과. 잔여: 멀티노드 통합(libcluster), A2A HTTP 서버(`el_graph_a2a` 패키지), 전달 보장/netsplit |
+| **M5 분산** 🔶 코어 완료 (2026-06-13) | 핸드오프(SignalReAct `:emit` → 버스 파이프라인), `:pg` 전송(Bus.Pg — Agent 구독 분산, 함수 구독 거부), A2A 매핑(`A2A` — Task 상태/Agent Card/Message 변환, 순수 함수) | 코어 충족: 2-에이전트 파이프라인·:pg fan-out 테스트 통과. **잔여 종료(2026-06-17)**: 멀티노드 `:peer` 통합 테스트 + at-least-once 멱등 수신(Signal id/Dedup) 완료, A2A HTTP 서버는 `el_graph_web`(§14 T1.3)로 완료, libcluster는 호스트 위임 |
 | **관측 트랙** 🔶 진행 중 (2026-06-14) | telemetry 계측(invoke/node/llm.chat span + retry/interrupt 이벤트) → OTel 브리지 → Langfuse 실전송 검증. ElTrace LiveView UI(별도 `el_trace` 앱, Phoenix/LiveView — #1 인터럽트 가시성·#2 thread 생애·#4 time-travel 분기) | Langfuse 연동은 실데이터 검증 완료. ElTrace `el_trace` 앱 분리 + LiveView 완료: Timeline 실시간 시각화(telemetry→PubSub), 인터럽트 승인/거절(resume), "여기서 분기"(Replay) — LiveViewTest + 브라우저 검증. #3 핸드오프 그래프: 데이터/렌더 계층 완료(`ElTrace.Handoff` build/to_dot/render + `Handoff.Collector`가 `[:el_graph, :agent, :handoff]` telemetry 수집, `ElTrace.handoff_graph/0`) — LiveView DOT 시각화만 잔여. 잔여: 핸드오프 LiveView UI, `el_graph_otel` 앱 분리 |
 
 ## 9. 비목표
@@ -282,7 +282,7 @@ end
 - 상태 스키마의 struct 기반 타이핑(현재는 맵+키 정의) 도입 여부 — 보류(맵+키 정의로 충분, struct는 필요해지면)
 - 체크포인트 마이그레이션 헬퍼 API 형태 — v1 스키마가 실사용에서 굳은 뒤 설계
 - ~~brainlid/langchain 재사용~~ → **결정(R6)**: 자체 Req 어댑터(`ElGraph.LLM.*`) 채택. 의존성 통제·중립 메시지 형식 일관성 우선
-- ~~**잔여(M5 후속)**: A2A HTTP 서버 패키지, OTel SDK 브리지 패키지, SSE 스트리밍~~ → **완료(§14)**: A2A+AG-UI HTTP 서버(`el_graph_web`), OTel SDK 브리지(`el_graph_otel`, 병렬 컨텍스트 전파 포함), LLM SSE 스트리밍(`ElGraph.LLM`). 잔여: 멀티노드 통합 테스트(libcluster), 전달 보장/netsplit 대응 — 별도 인프라 작업
+- ~~**잔여(M5 후속)**: A2A HTTP 서버 패키지, OTel SDK 브리지 패키지, SSE 스트리밍~~ → **완료(§14)**: A2A+AG-UI HTTP 서버(`el_graph_web`), OTel SDK 브리지(`el_graph_otel`, 병렬 컨텍스트 전파 포함), LLM SSE 스트리밍(`ElGraph.LLM`). 잔여: ~~멀티노드 통합 테스트, 전달 보장/netsplit~~ → **완료(2026-06-17)**: `:peer` 2노드 `:pg` fan-out 통합 테스트(`bus_multinode_test.exs`, `:distributed` 태그), Signal `id` + `Signal.Dedup` + Agent `dedup:` 옵션으로 at-least-once 멱등 수신(netsplit 재전달 흡수). libcluster는 코어 의존성 0 원칙상 호스트 앱에 위임(Bus.Pg moduledoc에 가이드)
 
 ## 12. 검토 이력
 

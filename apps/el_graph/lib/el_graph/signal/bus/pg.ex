@@ -7,6 +7,20 @@ defmodule ElGraph.Signal.Bus.Pg do
   `:pg`가 클러스터 전체 멤버십을 동기화하므로 발행은 원격 노드의 Agent에도 닿는다.
 
   함수 구독은 지원하지 않는다 (fun은 노드 경계를 넘지 못한다) — `ElGraph.Signal.Bus`가 거부.
+
+  ## 분산 운영 (SPEC §6)
+
+    * **클러스터 형성** — ElGraph는 코어 의존성 0 원칙상 클러스터러를 번들하지 않는다.
+      호스트 앱이 [libcluster](https://hex.pm/packages/libcluster)로 노드를 잇는다(예: `Cluster.Strategy.Gossip`).
+      노드가 연결되면 `:pg`가 같은 scope의 멤버십을 자동 동기화한다.
+    * **전달 보장** — `:pg` 발행은 **best-effort**다. netsplit 회복 시 멤버십 재동기화로 같은
+      시그널이 **재전달**될 수 있다. `ElGraph.Signal`은 발행 시 `id`가 스탬프되므로, 수신 측은
+      `ElGraph.Signal.Dedup`(또는 `ElGraph.Agent`의 `dedup: max` 옵션)으로 **at-least-once를
+      멱등하게** 처리한다 — 재전달은 한 번만 실행된다.
+    * **netsplit** — 분단 중에는 각 파티션이 자기 멤버에게만 닿는다(전달 손실 가능 — best-effort).
+      회복 후 `:pg`가 멤버십을 재조정하며, 중복 전달은 위 멱등 수신으로 흡수된다.
+
+  멀티노드 fan-out 검증: `test/el_graph/signal/bus_multinode_test.exs`(`:distributed`, `:peer` 2노드).
   """
 
   alias ElGraph.Signal
