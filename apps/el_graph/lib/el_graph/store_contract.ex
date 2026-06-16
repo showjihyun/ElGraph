@@ -2,6 +2,9 @@ defmodule ElGraph.StoreContract do
   @moduledoc """
   모든 Store 어댑터가 통과해야 하는 공유 계약 테스트 (SPEC §6).
 
+  `ElGraph.CheckpointerContract`와 같은 이유로 `lib`에 둔다 — 다른 우산 앱
+  (예: `el_graph_redis`의 `ElGraph.Store.Redis`)의 테스트가 `use` 할 수 있어야 한다.
+
   사용하는 테스트 모듈은 `setup`에서 `%{mod: 어댑터, config: 설정}`을 제공해야 한다.
   """
 
