@@ -17,7 +17,25 @@ defmodule ElGraph.Memory.Backend.Mem0IntegrationTest do
 
     assert :ok = Backend.remember(backend(), ns, "The user's favorite language is Elixir.")
 
-    assert {:ok, hits} = Backend.recall(backend(), ns, "what language does the user like?")
+    # Mem0 add는 비동기로 색인된다(응답 status=PENDING) — 사실이 검색 가능해질 때까지 폴링한다.
+    assert {:ok, hits} = poll_recall(backend(), ns, "what language does the user like?", 30)
     assert Enum.any?(hits, &(&1 =~ "Elixir"))
+  end
+
+  defp poll_recall(_backend, _ns, _query, 0), do: {:ok, []}
+
+  defp poll_recall(backend, ns, query, tries) do
+    case Backend.recall(backend, ns, query) do
+      {:ok, [_ | _]} = hit ->
+        hit
+
+      _ ->
+        receive do
+        after
+          1_000 -> :ok
+        end
+
+        poll_recall(backend, ns, query, tries - 1)
+    end
   end
 end
