@@ -29,13 +29,15 @@ defmodule ElGraph.Executor do
 
     base = Keyword.get(opts, :initial_state)
 
-    with_span(meta, fn ->
-      with_durability(meta, fn meta ->
-        with {:ok, state} <- init_state(graph, input, base),
-             :ok <- save_checkpoint(meta, 0, state, entries),
-             :ok <- check_static_interrupt(meta, 0, state, entries) do
-          loop(graph, entries, state, 0, meta)
-        end
+    with_task_cache(meta, %{}, fn meta ->
+      with_span(meta, fn ->
+        with_durability(meta, fn meta ->
+          with {:ok, state} <- init_state(graph, input, base),
+               :ok <- save_checkpoint(meta, 0, state, entries),
+               :ok <- check_static_interrupt(meta, 0, state, entries) do
+            loop(graph, entries, state, 0, meta)
+          end
+        end)
       end)
     end)
   end
@@ -62,9 +64,11 @@ defmodule ElGraph.Executor do
           meta = %{meta | interrupts: checkpoint.interrupts, interrupt_step: checkpoint.step}
           entries = normalize_entries(checkpoint.next)
 
-          with_span(meta, fn ->
-            with_durability(meta, fn meta ->
-              loop(graph, entries, checkpoint.state, checkpoint.step, meta)
+          with_task_cache(meta, seed_cache(checkpoint), fn meta ->
+            with_span(meta, fn ->
+              with_durability(meta, fn meta ->
+                loop(graph, entries, checkpoint.state, checkpoint.step, meta)
+              end)
             end)
           end)
         end
@@ -86,11 +90,13 @@ defmodule ElGraph.Executor do
     meta = build_meta(opts)
     entries = normalize_entries(checkpoint.next)
 
-    with_span(meta, fn ->
-      with_durability(meta, fn meta ->
-        with :ok <- save_checkpoint(meta, checkpoint.step, checkpoint.state, checkpoint.next) do
-          loop(graph, entries, checkpoint.state, checkpoint.step, meta)
-        end
+    with_task_cache(meta, seed_cache(checkpoint), fn meta ->
+      with_span(meta, fn ->
+        with_durability(meta, fn meta ->
+          with :ok <- save_checkpoint(meta, checkpoint.step, checkpoint.state, checkpoint.next) do
+            loop(graph, entries, checkpoint.state, checkpoint.step, meta)
+          end
+        end)
       end)
     end)
   end
@@ -130,7 +136,8 @@ defmodule ElGraph.Executor do
       cancel_flag: Keyword.get(opts, :cancel_flag),
       introspect: Keyword.get(opts, :introspect),
       durability: validate_durability(Keyword.get(opts, :durability, :sync)),
-      async_writer: nil
+      async_writer: nil,
+      task_cache: nil
     }
   end
 
@@ -145,6 +152,26 @@ defmodule ElGraph.Executor do
       {fun.(), %{thread_id: meta.thread_id}}
     end)
   end
+
+  # task 메모이제이션 캐시 (SPEC §3.5, durability+): 실행 단위 공개 ETS 테이블.
+  # `Ctx.memo/3`가 노드 안에서 읽고/쓰며(병렬 노드 Task에서도 접근 가능해 public),
+  # 체크포인트에 스냅샷으로 영속돼 재개 시 seed로 복원된다 — 노드 재실행에도 재계산 방지.
+  defp with_task_cache(meta, seed, fun) do
+    tid = :ets.new(:el_graph_task_cache, [:set, :public])
+    for {key, value} <- seed, do: :ets.insert(tid, {key, value})
+
+    try do
+      fun.(%{meta | task_cache: tid})
+    after
+      :ets.delete(tid)
+    end
+  end
+
+  defp dump_cache(%{task_cache: nil}), do: %{}
+  defp dump_cache(%{task_cache: tid}), do: tid |> :ets.tab2list() |> Map.new()
+
+  # 구버전 체크포인트(task_cache 필드 이전)도 안전하게 처리한다.
+  defp seed_cache(checkpoint), do: Map.get(checkpoint, :task_cache) || %{}
 
   # 입력은 베이스(기본값 또는 이전 대화 상태) 위에 reducer를 통해 적용된다.
   # `:initial_state`(thread 정책 fixed, 마찰 7)가 주어지면 defaults 대신 그 위에서 시작한다.
@@ -289,7 +316,8 @@ defmodule ElGraph.Executor do
       assigns: meta.assigns,
       resume_values: resume_values(meta, node, step),
       interrupt_counter: :counters.new(1, []),
-      cancel_flag: meta.cancel_flag
+      cancel_flag: meta.cancel_flag,
+      task_cache: meta.task_cache
     }
 
     # :send의 입력은 상태가 아니라 send가 지정한 맵이다 (SPEC §3.2).
@@ -496,7 +524,9 @@ defmodule ElGraph.Executor do
       interrupted: node,
       interrupts: meta.interrupts,
       # 재개 후에도 보존되는 인터럽트 발생 기록 (ElTrace #1).
-      interrupt_info: %{node: node, payload: payload}
+      interrupt_info: %{node: node, payload: payload},
+      # 인터럽트 전 memo된 결과를 보존 → 재개 시 노드 재실행에도 재계산 안 함.
+      task_cache: dump_cache(meta)
     }
 
     case mod.put(config, checkpoint) do
@@ -544,8 +574,14 @@ defmodule ElGraph.Executor do
     mod.put(config, checkpoint(meta, step, state, next))
   end
 
-  defp checkpoint(%{thread_id: thread_id}, step, state, next),
-    do: %Checkpoint{thread_id: thread_id, step: step, state: state, next: next}
+  defp checkpoint(%{thread_id: thread_id} = meta, step, state, next),
+    do: %Checkpoint{
+      thread_id: thread_id,
+      step: step,
+      state: state,
+      next: next,
+      task_cache: dump_cache(meta)
+    }
 
   defp pending_writes(%{checkpointer: nil}, _step), do: %{}
 

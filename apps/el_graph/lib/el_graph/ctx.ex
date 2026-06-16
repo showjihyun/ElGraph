@@ -17,7 +17,8 @@ defmodule ElGraph.Ctx do
     resume_values: [],
     interrupt_counter: nil,
     cancel_flag: nil,
-    assigns: %{}
+    assigns: %{},
+    task_cache: nil
   ]
 
   @type t :: %__MODULE__{
@@ -28,7 +29,8 @@ defmodule ElGraph.Ctx do
           resume_values: [term()],
           interrupt_counter: :counters.counters_ref() | nil,
           cancel_flag: :atomics.atomics_ref() | nil,
-          assigns: map()
+          assigns: map(),
+          task_cache: :ets.tid() | nil
         }
 
   @doc """
@@ -74,6 +76,35 @@ defmodule ElGraph.Ctx do
   defp next_interrupt_count(%__MODULE__{interrupt_counter: counter}) do
     :ok = :counters.add(counter, 1, 1)
     :counters.get(counter, 1)
+  end
+
+  @doc """
+  부수효과 있는 계산(LLM/툴 호출 등)을 `key`로 메모이즈한다 (replay-safe durability).
+
+  처음 호출되면 `fun`을 실행해 결과를 이 실행(run)의 task 캐시에 기록하고 반환한다.
+  이후 같은 노드에서 같은 `key`로 다시 호출하거나(재시도), 인터럽트/크래시 후 **재개 시
+  노드가 처음부터 재실행될 때**는 `fun`을 다시 돌리지 않고 캐시된 값을 돌려준다 —
+  LLM 호출 중복 비용·중복 부수효과를 막는다(Temporal Activity / LangGraph `@task`에 해당).
+
+  캐시는 체크포인트에 함께 영속되므로 재개(`resume`/`resume_from`)를 넘어 유효하다.
+  따라서 `fun`의 결과는 직렬화 가능해야 한다(pid/ref/port 금지 — 재개 시 무의미).
+  `task_cache`가 없는 컨텍스트(예: 실행기 밖에서 노드 직접 호출)에서는 그냥 `fun`을 실행한다.
+
+      answer = Ctx.memo(ctx, :classify, fn -> LLM.chat(...) end)
+  """
+  @spec memo(t(), term(), (-> value)) :: value when value: term()
+  def memo(%__MODULE__{task_cache: nil}, _key, fun), do: fun.()
+
+  def memo(%__MODULE__{task_cache: tid, node: node}, key, fun) do
+    case :ets.lookup(tid, {node, key}) do
+      [{_k, value}] ->
+        value
+
+      [] ->
+        value = fun.()
+        :ets.insert(tid, {{node, key}, value})
+        value
+    end
   end
 
   @doc """
