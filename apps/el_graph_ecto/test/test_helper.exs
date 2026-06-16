@@ -8,7 +8,16 @@ db_ok? =
       {:error, {:already_started, _}} -> :ok
     end
 
-    Ecto.Migrator.run(Repo, [{20_260_614_000_001, ElGraphEcto.Migration}], :up, all: true)
+    Ecto.Migrator.run(
+      Repo,
+      [
+        {20_260_614_000_001, ElGraphEcto.Migration},
+        {20_260_616_000_001, ElGraphEcto.StoreMigration}
+      ],
+      :up,
+      all: true
+    )
+
     Ecto.Adapters.SQL.Sandbox.mode(Repo, :manual)
     true
   rescue
