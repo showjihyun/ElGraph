@@ -4,6 +4,9 @@ defmodule ElGraph.ExecutionTelemetryTest do
   alias ElGraph.TestNodes
   alias ElGraph.Checkpointer.ETS
 
+  def put1(_state, _ctx), do: %{result: 1}
+  def put2(_state, _ctx), do: %{result: 2}
+
   describe "retry telemetry (SPEC §4)" do
     test "emits a node.retry event per retry attempt with reason and attempt" do
       ref =
@@ -48,7 +51,36 @@ defmodule ElGraph.ExecutionTelemetryTest do
                ElGraph.invoke(graph, %{}, checkpointer: cp, thread_id: "t2")
 
       assert_receive {[:el_graph, :node, :interrupt], ^ref, %{},
-                      %{node: :ask, thread_id: "t2", payload: %{question: "name?"}}}
+                      %{
+                        node: :ask,
+                        thread_id: "t2",
+                        payload: %{question: "name?"},
+                        kind: :dynamic
+                      }}
+    end
+
+    test "emits a static node.interrupt event for interrupt_before nodes" do
+      cp_pid = start_supervised!(ETS)
+      cp = {ETS, ETS.config(cp_pid)}
+      ref = :telemetry_test.attach_event_handlers(self(), [[:el_graph, :node, :interrupt]])
+
+      graph =
+        ElGraph.new()
+        |> ElGraph.state(:result)
+        |> ElGraph.add_node(:a, {__MODULE__, :put1, []})
+        |> ElGraph.add_node(:b, {__MODULE__, :put2, []})
+        |> ElGraph.add_edge(:a, :b)
+        |> ElGraph.compile(entry: :a)
+
+      assert {:interrupted, %{before: [:b]}} =
+               ElGraph.invoke(graph, %{},
+                 checkpointer: cp,
+                 thread_id: "t3",
+                 interrupt_before: [:b]
+               )
+
+      assert_receive {[:el_graph, :node, :interrupt], ^ref, %{},
+                      %{node: :b, thread_id: "t3", kind: :static}}
     end
   end
 end

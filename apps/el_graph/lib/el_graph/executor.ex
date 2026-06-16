@@ -458,6 +458,15 @@ defmodule ElGraph.Executor do
         # 인터럽트 시점의 체크포인트는 재개를 위해 반드시 영속돼야 한다.
         # :exit 모드는 매 step 저장을 건너뛰므로 여기서 강제 저장한다.
         persist_for_interrupt(meta, step, state, next)
+
+        for node <- hits do
+          :telemetry.execute(
+            [:el_graph, :node, :interrupt],
+            %{},
+            %{node: node, step: step, thread_id: meta.thread_id, kind: :static}
+          )
+        end
+
         {:interrupted, %{thread_id: meta.thread_id, step: step, before: hits, state: state}}
     end
   end
@@ -476,7 +485,7 @@ defmodule ElGraph.Executor do
     :telemetry.execute(
       [:el_graph, :node, :interrupt],
       %{},
-      %{node: node, step: step, thread_id: meta.thread_id, payload: payload}
+      %{node: node, step: step, thread_id: meta.thread_id, payload: payload, kind: :dynamic}
     )
 
     checkpoint = %Checkpoint{

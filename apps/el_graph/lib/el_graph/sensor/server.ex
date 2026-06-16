@@ -35,6 +35,12 @@ defmodule ElGraph.Sensor.Server do
   defp do_poll(state) do
     case state.module.poll(state.sensor_state) do
       {:signal, signal, next} ->
+        :telemetry.execute(
+          [:el_graph, :sensor, :signal],
+          %{},
+          %{sensor: state.module, signal_type: signal.type}
+        )
+
         state.dispatch.(signal)
         %{state | sensor_state: next}
 
