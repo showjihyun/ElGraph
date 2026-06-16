@@ -56,21 +56,46 @@ defmodule ElGraph.Memory do
 
   ## semantic — subject별 최신 사실
 
+  @typedoc """
+  같은 subject에 새 값이 들어올 때의 충돌 해소 정책.
+
+    * `:latest`  — 새 값이 과거를 대체(기본). 직전 값은 히스토리로.
+    * `:reject`  — 기존 값을 유지하고 새 값을 버린다(write-once 사실). 히스토리 변화 없음.
+    * `fun/2`    — `(기존값, 새값) -> 병합값`. 병합 결과를 현재 값으로 두고 직전 값은 히스토리로.
+  """
+  @type on_conflict :: :latest | :reject | (term(), term() -> term())
+
   @doc """
   사실을 기록한다 — 같은 subject의 과거 값을 대체한다(시점 진실).
 
   대체되는 직전 값은 `fact_history/3`로 감사할 수 있도록 subject별 히스토리에 보관한다.
+
+  옵션:
+
+    * `:at` — 정렬/시점 키(기본 단조 증가). `fact_at/4`의 비교 기준.
+    * `:on_conflict` — 기존 값이 있을 때의 정책(`t:on_conflict/0`, 기본 `:latest`).
   """
   @spec set_fact(t(), namespace(), String.t(), term(), keyword()) :: :ok
   def set_fact(%__MODULE__{store: {mod, config}} = mem, ns, subject, value, opts \\ []) do
     at = Keyword.get_lazy(opts, :at, &mono/0)
+    on_conflict = Keyword.get(opts, :on_conflict, :latest)
 
     case mod.get(config, scope(ns, "semantic"), subject) do
-      {:ok, prior} -> push_history(mem, ns, subject, prior)
-      :not_found -> :ok
+      {:ok, prior} -> resolve_conflict(mem, ns, subject, prior, value, at, on_conflict)
+      :not_found -> put(mem, scope(ns, "semantic"), subject, %{value: value, at: at})
     end
+  end
 
+  defp resolve_conflict(_mem, _ns, _subject, _prior, _value, _at, :reject), do: :ok
+
+  defp resolve_conflict(mem, ns, subject, prior, value, at, :latest) do
+    push_history(mem, ns, subject, prior)
     put(mem, scope(ns, "semantic"), subject, %{value: value, at: at})
+  end
+
+  defp resolve_conflict(mem, ns, subject, prior, value, at, merge) when is_function(merge, 2) do
+    push_history(mem, ns, subject, prior)
+    put(mem, scope(ns, "semantic"), subject, %{value: merge.(prior.value, value), at: at})
   end
 
   @doc "subject의 현재 참 값을 회수한다."
@@ -79,6 +104,21 @@ defmodule ElGraph.Memory do
     case mod.get(config, scope(ns, "semantic"), subject) do
       {:ok, %{value: value}} -> {:ok, value}
       :not_found -> :unknown
+    end
+  end
+
+  @doc """
+  주어진 시점 `at`에 참이었던 값을 회수한다(temporal 쿼리).
+
+  현재 값과 `fact_history/3`의 과거 값을 합친 타임라인에서, `entry.at <= at`인 것 중
+  가장 최근 값을 돌려준다. `at`이 가장 이른 값보다 앞서면 `:unknown`.
+  비교는 `set_fact`의 `:at`과 동일 시계를 쓴다는 전제다.
+  """
+  @spec fact_at(t(), namespace(), String.t(), term()) :: {:ok, term()} | :unknown
+  def fact_at(%__MODULE__{} = mem, ns, subject, at) do
+    case Enum.find(timeline(mem, ns, subject), &(&1.at <= at)) do
+      %{value: value} -> {:ok, value}
+      nil -> :unknown
     end
   end
 
@@ -172,6 +212,16 @@ defmodule ElGraph.Memory do
   defp push_history(%__MODULE__{} = mem, ns, subject, prior) do
     history = fact_history(mem, ns, subject)
     put(mem, scope(ns, "semantic-history"), subject, [prior | history])
+  end
+
+  # 현재 값 + 과거 값 타임라인(최신순). fact_at의 비교 대상.
+  defp timeline(%__MODULE__{store: {mod, config}} = mem, ns, subject) do
+    history = fact_history(mem, ns, subject)
+
+    case mod.get(config, scope(ns, "semantic"), subject) do
+      {:ok, current} -> [current | history]
+      :not_found -> history
+    end
   end
 
   # 코사인 유사도. 0 노름이면 0.0 (divide-by-zero 가드).

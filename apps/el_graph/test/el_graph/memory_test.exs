@@ -146,6 +146,61 @@ defmodule ElGraph.MemoryTest do
     end
   end
 
+  describe "temporal queries — value valid at a point in time" do
+    test "returns the value that was true at the given time", %{mem: mem} do
+      :ok = Memory.set_fact(mem, @ns, "plan", "free", at: 1)
+      :ok = Memory.set_fact(mem, @ns, "plan", "pro", at: 3)
+
+      assert {:ok, "free"} = Memory.fact_at(mem, @ns, "plan", 1)
+      assert {:ok, "free"} = Memory.fact_at(mem, @ns, "plan", 2)
+      assert {:ok, "pro"} = Memory.fact_at(mem, @ns, "plan", 3)
+      assert {:ok, "pro"} = Memory.fact_at(mem, @ns, "plan", 5)
+    end
+
+    test "returns :unknown before the earliest known value", %{mem: mem} do
+      :ok = Memory.set_fact(mem, @ns, "plan", "free", at: 2)
+      assert :unknown = Memory.fact_at(mem, @ns, "plan", 1)
+    end
+
+    test "returns :unknown for an unknown subject", %{mem: mem} do
+      assert :unknown = Memory.fact_at(mem, @ns, "nope", 99)
+    end
+  end
+
+  describe "conflict resolution — on_conflict policy" do
+    test "defaults to :latest (newer replaces older)", %{mem: mem} do
+      :ok = Memory.set_fact(mem, @ns, "plan", "free", at: 1)
+      :ok = Memory.set_fact(mem, @ns, "plan", "pro", at: 2)
+      assert {:ok, "pro"} = Memory.get_fact(mem, @ns, "plan")
+    end
+
+    test ":reject keeps the existing value and records no history", %{mem: mem} do
+      :ok = Memory.set_fact(mem, @ns, "plan", "free", at: 1)
+      :ok = Memory.set_fact(mem, @ns, "plan", "pro", at: 2, on_conflict: :reject)
+
+      assert {:ok, "free"} = Memory.get_fact(mem, @ns, "plan")
+      assert [] = Memory.fact_history(mem, @ns, "plan")
+    end
+
+    test ":reject still sets the value when no prior exists", %{mem: mem} do
+      :ok = Memory.set_fact(mem, @ns, "plan", "pro", at: 1, on_conflict: :reject)
+      assert {:ok, "pro"} = Memory.get_fact(mem, @ns, "plan")
+    end
+
+    test "a merge function combines the prior and new values", %{mem: mem} do
+      :ok = Memory.set_fact(mem, @ns, "tags", ["a"], at: 1)
+
+      :ok =
+        Memory.set_fact(mem, @ns, "tags", ["b"],
+          at: 2,
+          on_conflict: fn old, new -> old ++ new end
+        )
+
+      assert {:ok, ["a", "b"]} = Memory.get_fact(mem, @ns, "tags")
+      assert [%{value: ["a"], at: 1}] = Memory.fact_history(mem, @ns, "tags")
+    end
+  end
+
   describe "forget" do
     test "forgets a semantic fact", %{mem: mem} do
       :ok = Memory.set_fact(mem, @ns, "plan", "pro", at: 1)
