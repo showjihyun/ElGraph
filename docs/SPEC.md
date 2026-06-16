@@ -282,7 +282,7 @@ end
 - 상태 스키마의 struct 기반 타이핑(현재는 맵+키 정의) 도입 여부 — 보류(맵+키 정의로 충분, struct는 필요해지면)
 - 체크포인트 마이그레이션 헬퍼 API 형태 — v1 스키마가 실사용에서 굳은 뒤 설계
 - ~~brainlid/langchain 재사용~~ → **결정(R6)**: 자체 Req 어댑터(`ElGraph.LLM.*`) 채택. 의존성 통제·중립 메시지 형식 일관성 우선
-- **잔여(M5 후속)**: A2A HTTP 서버 패키지, OTel SDK 브리지 패키지, SSE 스트리밍, 멀티노드 통합 테스트(libcluster), 전달 보장/netsplit 대응 — 전부 별도 패키지·인프라 작업
+- ~~**잔여(M5 후속)**: A2A HTTP 서버 패키지, OTel SDK 브리지 패키지, SSE 스트리밍~~ → **완료(§14)**: A2A+AG-UI HTTP 서버(`el_graph_web`), OTel SDK 브리지(`el_graph_otel`, 병렬 컨텍스트 전파 포함), LLM SSE 스트리밍(`ElGraph.LLM`). 잔여: 멀티노드 통합 테스트(libcluster), 전달 보장/netsplit 대응 — 별도 인프라 작업
 
 ## 12. 검토 이력
 
@@ -303,9 +303,9 @@ SPEC 본문은 설계 시점 표기를 유지한다. 실제 구현이 본문과 
 | §4 LLM 어댑터 별도 패키지 `el_graph_llm` | in-repo (`ElGraph.LLM.OpenAI/Anthropic/Gemini`) | 출시 전 분리 재평가. SSE 스트리밍은 미구현(비스트리밍 우선) |
 | §5 SignalTransport behaviour | `ElGraph.Signal.Bus`(`transport: :local`/`:pg`) | 버스가 곧 transport. `:pg`는 Agent 구독만 분산, 함수 구독 거부 |
 | §6 핸드오프 `{:command, :handoff, ...}` | Skill `:emit` 옵션 → 버스 발행 | `:command` goto는 그래프 내 노드용. 핸드오프는 버스가 자연스러움 |
-| §6 A2A 어댑터(Phoenix HTTP 서버) | `ElGraph.A2A` 순수 매핑(Task 상태/Agent Card/Message) | Task 상태가 M1 프리미티브와 1:1 → 순수 함수로 충분. HTTP 서버는 `el_graph_a2a` 몫 |
-| §3.7 OTel 어댑터 | `ElGraph.OTel.Mapping` 순수 함수 | OTel SDK는 전역 상태라 async 테스트와 충돌 → 매핑만 in-repo, SDK 브리지는 `el_graph_otel` 몫 |
-| §6 오케스트레이션 템플릿(supervisor/magentic) | 미구현 — 핸드오프/fan-out은 버스로 충분히 표현됨 | 템플릿은 표본이 더 쌓이면. 현재 버스+emit으로 파이프라인 동작 |
+| §6 A2A 어댑터(Phoenix HTTP 서버) | `ElGraph.A2A` 순수 매핑 + **HTTP 서버 `el_graph_web`(§14 T1.3 완료)** | Task 상태가 M1 프리미티브와 1:1 → 순수 매핑 후 JSON-RPC/SSE 서버를 `el_graph_web`로 추가 |
+| §3.7 OTel 어댑터 | `ElGraph.OTel.Mapping` 순수 함수 + **SDK 브리지 `el_graph_otel`(§14 T1.4 완료, 병렬 컨텍스트 전파 포함)** | 매핑만 코어 잔류(async 테스트 호환), SDK 브리지는 `el_graph_otel`로 분리 완료 |
+| §6 오케스트레이션 템플릿(supervisor/magentic) | **구현 완료(§14 T2.5)**: `ElGraph.Orchestration` supervisor/group_chat/magentic | 도그푸딩 표본 축적 후 보고서 반영으로 템플릿화. 버스+emit 위에 구축 |
 | §3.6 동적 인터럽트 throw | 노드 래퍼(Task 내부)에서 catch → 태그 반환 | R1 설계대로 구현. timeout 노드 안에서도 동작 검증 |
 | §3.6 인터럽트 반환 `{:interrupted, ref, state}` | `{:interrupted, map()}` (ref 없는 2-튜플, `node`·`payload`·`next` 포함 맵) | resume이 ref 대신 thread_id로 매칭 → ref 불필요. §6 A2A 표·README도 2-튜플 기준 |
 
@@ -334,7 +334,7 @@ SPEC 본문은 설계 시점 표기를 유지한다. 실제 구현이 본문과 
 | T1.3 | **A2A + AG-UI HTTP 서버** | `el_graph_web`(신규 앱) | Plug/Bandit. A2A JSON-RPC 2.0(`message/send`·`tasks/get`·`message/stream` SSE), `.well-known/agent-card.json`, `TaskStore`, AG-UI `/agui/:name/run` SSE. `server_spec/1`로 호스트 마운트(전역 서버 자동기동 안 함) | 28 |
 | T1.4 | **OTel 병렬 컨텍스트 전파** | `ElGraph.Executor.exec_all`, `OTel.Mapping` | 병렬 Task에 부모 OTel 컨텍스트 캡처+attach → 노드 span이 invoke span 아래 중첩. Mapping에 invoke/node `error.type` 추가 | 8 + 연계 |
 | T2.5 | **오케스트레이션 템플릿** | `ElGraph.Orchestration` | `supervisor/3`(오케스트레이터-워커), `group_chat/2`(스피커 선택 정책), `magentic/3`(task-ledger + 무한루프 stall guard) | 11 + int |
-| T2.6 | **고급 메모리** | `ElGraph.Memory` (+`Memory.Embedder`) | 3-스코프(episodic/semantic/procedural) + 시점진실(latest-wins), 시맨틱 recall(`recall_relevant/4`, cosine), supersede 이력(`fact_history/3`), `forget/4`. Store behaviour만 사용 | 16 |
+| T2.6 | **고급 메모리** | `ElGraph.Memory` (+`Memory.Embedder`, `Memory.Backend`) | 3-스코프(episodic/semantic/procedural) + 시점진실(latest-wins), 시맨틱 recall(`recall_relevant/4`, cosine), supersede 이력(`fact_history/3`), `forget/4`, **temporal 쿼리(`fact_at/4`, 시점 T 유효값)**, **충돌해소(`on_conflict: :latest\|:reject\|fun/2`)**. Store behaviour만 사용. **교체형 `Memory.Backend`(remember/recall): `Backend.Native`(임베더, 의존 0) + `Backend.Mem0`(REST 위임) + `Backend.Zep`(temporal KG, `graph`/`graph/search` edge fact 회수). 외부 어댑터는 Req.Test 단위 + 실연동 :integration** — 구조화 facts는 코어 전용 유지 | 41 + int |
 | T3.8 | **Evals** | `ElGraph.Eval` | 데이터셋 평가 + 플러그형 스코어러 + LLM-judge, **체크포인트-리플레이 평가**(`replay_eval/6`, time-travel), 병렬 평가 + 집계 메트릭, JSONL 로딩, baseline 회귀 비교(`compare/2`) | 13 |
 | T3.9 | **가드레일 / 정책** | `ElGraph.Guardrail` (+`Guardrail.PII`) | deny/redact/max_length/authorize_tool + PII 라이브러리(email/phone/card/ssn/rrn/ipv4), 구조화 출력 검증(`validate_schema/1`, NimbleOptions), 차단 telemetry, 노드 통합 `guard_value/4` | 25 |
 | T3.10 | **샌드박스 코드 실행** | `ElGraph.Sandbox`(+`.Command`/`.Docker`) + `Actions.CodeExec` | 외부 격리 위임 behaviour. 타임아웃(`run_with_timeout`, 누수 없음)·출력 크기 제한, Docker 백엔드(`--network=none`/`--read-only`/mem·cpu 기본값). **인프로세스 eval 안 함** | 16 + int |

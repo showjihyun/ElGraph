@@ -7,8 +7,9 @@ defmodule ElGraph.OTel.Bridge do
   `opentelemetry_telemetry`가 span 컨텍스트(부모-자식)를 관리하므로 같은 프로세스 내
   중첩(invoke → node → llm.chat)은 하나의 trace로 묶인다.
 
-  **한계**: 병렬 노드는 별도 Task(프로세스)라 OTel 컨텍스트가 자동 전파되지 않는다 —
-  병렬 브랜치의 span은 같은 trace에 연결되지 않을 수 있다(1차 한계).
+  병렬 노드는 별도 Task(프로세스)지만 `Executor.exec_all`이 부모 OTel 컨텍스트를 캡처해
+  각 Task에서 attach하므로, 병렬 브랜치 span도 같은 invoke trace 아래로 중첩된다
+  (검증: `langfuse_pipeline_test.exs`).
 
   ## Langfuse 연동
 
