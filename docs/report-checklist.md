@@ -148,7 +148,8 @@ T2.6 메모리를 보고서 야심(temporal·외부 메모리 흡수·영속)까
   at-least-once 멱등 수신, `:peer` 2노드 `:pg` fan-out 통합 테스트(`:distributed`),
   libcluster는 호스트 위임(코어 의존성 0).
 - **MCP 서버 노출**: `ElGraph.MCP.Server`(순수 JSON-RPC dispatch — initialize/tools/list/
-  tools/call, 전송 무관) + `ElGraphWeb.MCP.Router`(Streamable HTTP, `/mcp`). 외부 MCP
-  클라이언트(Claude 등)가 ElGraph Action을 호출. 툴 실패는 `isError:true` 결과로 반환.
+  tools/call, 전송 무관) + 두 transport: `ElGraphWeb.MCP.Router`(Streamable HTTP, `/mcp`)와
+  `ElGraph.MCP.Stdio`(줄 단위 JSON-RPC, CLI). 외부 MCP 클라이언트(Claude 등)가 ElGraph
+  Action을 호출. 툴 실패는 `isError:true` 결과로 반환.
 
-스위트: el_graph 490 · el_graph_web 47, Dialyzer 0.
+스위트: el_graph 495 · el_graph_web 47, Dialyzer 0.
