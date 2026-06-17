@@ -153,7 +153,8 @@ T2.6 메모리를 보고서 야심(temporal·외부 메모리 흡수·영속)까
   Action을 호출. 툴 실패는 `isError:true` 결과로 반환.
 
 - **MCP 클라이언트 보강**: `ElGraph.MCP.Client.StreamableHTTP`(구체 Streamable HTTP transport —
-  initialize 핸드셰이크 + tools/list·call) + `ElGraph.MCP.Client.Capabilities`(sampling/
-  elicitation/roots 광고 + 서버 개시 요청 디스패치, 자주 누락되는 차별점). 기존엔 behaviour만 존재.
+  initialize 핸드셰이크 + tools/list·call + **양방향 `listen/3`**) + `ElGraph.MCP.Client.Capabilities`
+  (sampling/elicitation/roots 광고 + 디스패치) + `ElGraph.MCP.Client.Receiver`(SSE 수신 루프 —
+  서버 개시 요청을 받아 응답을 POST로 되돌림). 기존엔 behaviour만 존재. sampling/elicitation/roots **라이브**.
 
-스위트: el_graph 507 · el_graph_web 47, Dialyzer 0.
+스위트: el_graph 513 · el_graph_web 47, Dialyzer 0.

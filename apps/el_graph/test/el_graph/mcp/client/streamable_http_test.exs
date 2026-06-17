@@ -99,4 +99,43 @@ defmodule ElGraph.MCP.Client.StreamableHTTPTest do
 
     assert {:error, {:rpc_error, -32601, "nope"}} = StreamableHTTP.list_tools(handle)
   end
+
+  test "listen receives a server-initiated request over SSE and posts a response back" do
+    parent = self()
+
+    Req.Test.stub(DuplexStub, fn conn ->
+      case conn.method do
+        "GET" ->
+          event =
+            "data: " <>
+              Jason.encode!(%{
+                "jsonrpc" => "2.0",
+                "id" => 1,
+                "method" => "sampling/createMessage",
+                "params" => %{"prompt" => "hi"}
+              }) <> "\n\n"
+
+          conn
+          |> Plug.Conn.put_resp_content_type("text/event-stream")
+          |> Plug.Conn.send_resp(200, event)
+
+        "POST" ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          send(parent, {:posted_back, Jason.decode!(body)})
+          Plug.Conn.send_resp(conn, 202, "")
+      end
+    end)
+
+    handlers = %{sampling: fn params -> %{"content" => params["prompt"]} end}
+
+    handle = %{
+      url: @url,
+      req_options: [plug: {Req.Test, DuplexStub}],
+      session_id: nil,
+      protocol_version: nil
+    }
+
+    assert :ok = StreamableHTTP.listen(handle, handlers)
+    assert_received {:posted_back, %{"id" => 1, "result" => %{"content" => "hi"}}}
+  end
 end

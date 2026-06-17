@@ -18,7 +18,8 @@ defmodule ElGraph.MCP.Client.StreamableHTTP do
 
   @behaviour ElGraph.MCP.Client
 
-  alias ElGraph.MCP.Client.Capabilities
+  alias ElGraph.LLM.SSE
+  alias ElGraph.MCP.Client.{Capabilities, Receiver}
 
   @type handle :: %{
           url: String.t(),
@@ -71,6 +72,39 @@ defmodule ElGraph.MCP.Client.StreamableHTTP do
     end
   end
 
+  @doc """
+  서버→클라이언트 SSE 스트림(GET)을 열어 서버 개시 요청(sampling/elicitation/roots)을
+  받고 응답을 POST로 되돌린다 (양방향). `handlers`는 `ElGraph.MCP.Client.Capabilities` 핸들러 맵.
+  스트림이 끝날 때까지 블록한다.
+  """
+  @spec listen(handle(), Capabilities.handlers(), keyword()) :: :ok | {:error, term()}
+  def listen(handle, handlers, opts \\ []) do
+    respond = fn json -> post_raw(handle, json) end
+
+    collector = fn {:data, data}, {req, resp} ->
+      buffer = Req.Response.get_private(resp, :mcp_buffer, "")
+      {payloads, rest} = SSE.parse(buffer, data)
+
+      Enum.each(payloads, fn json ->
+        case Receiver.handle_message(json, handlers) do
+          {:respond, response} -> respond.(response)
+          :ignore -> :ok
+        end
+      end)
+
+      {:cont, {req, Req.Response.put_private(resp, :mcp_buffer, rest)}}
+    end
+
+    headers = [{"accept", "text/event-stream"}] ++ headers(handle)
+    req_options = handle.req_options ++ Keyword.get(opts, :req_options, [])
+
+    case Req.get(handle.url, [headers: headers, into: collector, retry: false] ++ req_options) do
+      {:ok, %Req.Response{status: status}} when status in 200..299 -> :ok
+      {:ok, %Req.Response{status: status, body: body}} -> {:error, {:api_error, status, body}}
+      {:error, exception} -> {:error, {:transport_error, exception}}
+    end
+  end
+
   ## JSON-RPC over HTTP
 
   defp post(handle, method, params) do
@@ -104,6 +138,13 @@ defmodule ElGraph.MCP.Client.StreamableHTTP do
       [json: body, headers: headers(handle), retry: false] ++ handle.req_options
     )
 
+    :ok
+  end
+
+  # 이미 직렬화된 JSON-RPC 응답을 그대로 POST한다(수신 루프의 서버 요청 응답).
+  defp post_raw(handle, json) do
+    headers = [{"content-type", "application/json"}] ++ headers(handle)
+    Req.post(handle.url, [body: json, headers: headers, retry: false] ++ handle.req_options)
     :ok
   end
 
