@@ -152,4 +152,8 @@ T2.6 메모리를 보고서 야심(temporal·외부 메모리 흡수·영속)까
   `ElGraph.MCP.Stdio`(줄 단위 JSON-RPC, CLI). 외부 MCP 클라이언트(Claude 등)가 ElGraph
   Action을 호출. 툴 실패는 `isError:true` 결과로 반환.
 
-스위트: el_graph 495 · el_graph_web 47, Dialyzer 0.
+- **MCP 클라이언트 보강**: `ElGraph.MCP.Client.StreamableHTTP`(구체 Streamable HTTP transport —
+  initialize 핸드셰이크 + tools/list·call) + `ElGraph.MCP.Client.Capabilities`(sampling/
+  elicitation/roots 광고 + 서버 개시 요청 디스패치, 자주 누락되는 차별점). 기존엔 behaviour만 존재.
+
+스위트: el_graph 507 · el_graph_web 47, Dialyzer 0.
