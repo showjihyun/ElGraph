@@ -4,7 +4,7 @@ defmodule ElGraph.MixProject do
   def project do
     [
       app: :el_graph,
-      version: "0.2.0",
+      version: "0.3.0",
       build_path: "../../_build",
       config_path: "../../config/config.exs",
       deps_path: "../../deps",
@@ -13,7 +13,22 @@ defmodule ElGraph.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      dialyzer: dialyzer()
+      dialyzer: dialyzer(),
+      description:
+        "Graph-first agent framework on the BEAM — durable execution, HITL, time-travel, " <>
+          "checkpoints, agents, and bidirectional MCP. No Python.",
+      source_url: "https://github.com/showjihyun/ElGraph",
+      package: package()
+    ]
+  end
+
+  # hex 패키지 메타데이터(코어). 형제 앱(el_graph_web/ecto/redis/otel, el_trace)도 출시 시 동일 패턴.
+  defp package do
+    [
+      licenses: ["MIT"],
+      maintainers: ["Poor Coin Pepe"],
+      links: %{"GitHub" => "https://github.com/showjihyun/ElGraph"},
+      files: ~w(lib mix.exs)
     ]
   end
 

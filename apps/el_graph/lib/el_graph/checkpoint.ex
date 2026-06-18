@@ -3,7 +3,7 @@ defmodule ElGraph.Checkpoint do
   체크포인트 스냅샷 (SPEC §3.5).
 
   처음부터 동결되는 두 가지: `version` 필드(스키마 마이그레이션의 기반)와
-  pending writes(어댑터에 별도 저장 — `ElGraph.Checkpointer.put_writes/4`).
+  pending writes(어댑터에 별도 저장 — `c:ElGraph.Checkpointer.put_writes/4`).
   그래프 정의는 저장하지 않는다 — 재개 시 그래프는 항상 코드에서 재구성된다.
 
   `step`은 "다음에 실행할 superstep"을 뜻한다. `next: []`는 실행 완료를 뜻한다.

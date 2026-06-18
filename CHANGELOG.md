@@ -3,6 +3,42 @@
 이 프로젝트의 주요 변경 사항. 형식은 [Keep a Changelog](https://keepachangelog.com/),
 버전은 [SemVer](https://semver.org/)를 따른다.
 
+## [0.3.0] — 2026-06-18
+
+보고서 후속 심화(메모리 영속·관측·내구성+) + 양방향 MCP + 분산 전달 보장. 모든 변경 TDD,
+6개 앱 전부 Dialyzer 0 경고. el_graph 521 · el_graph_web 50 테스트 통과.
+
+### Added
+
+- **양방향 MCP** — ElGraph Action을 **MCP 서버**로 노출: `ElGraph.MCP.Server`(순수 JSON-RPC
+  dispatch — initialize/tools/resources/prompts), 두 transport `ElGraphWeb.MCP.Router`(Streamable
+  HTTP, `/mcp`)·`ElGraph.MCP.Stdio`(CLI, 줄 단위). **MCP 클라이언트** 보강:
+  `ElGraph.MCP.Client.StreamableHTTP`(구체 transport + 양방향 `listen/3`),
+  `ElGraph.MCP.Client.Capabilities`/`Receiver`(sampling/elicitation/roots 라이브). tools/call 입력 가드레일.
+- **메모리 심화** — `Memory.fact_at/4`(시점 T 유효값), `set_fact ... on_conflict:`
+  (`:latest`/`:reject`/병합 fn). 교체형 `ElGraph.Memory.Backend`(`Native`/`Mem0`/`Zep`).
+- **Store 영속 어댑터** — `ElGraph.Store.Redis`(Valkey, el_graph_redis) +
+  `ElGraph.Store.Postgres`(el_graph_ecto). `StoreContract`를 lib로 승격(3백엔드 공유 계약).
+- **task 메모이제이션** — `Ctx.memo/3`: LLM/툴 호출을 `{node, key}`로 캐시, 체크포인트 영속
+  → 재시도·재개 시 재실행 금지(durability+, Temporal Activity/@task).
+- **구조화 출력 재시도** — `ElGraph.LLM.Structured.generate/4`: LLM 출력→스키마 검증→오류
+  되먹임 재시도(Instructor/Pydantic AI 패턴).
+- **분산 전달 보장** — Signal `id`(CloudEvents) + `ElGraph.Signal.Dedup` + Agent `dedup:` 옵션으로
+  at-least-once 멱등 수신(netsplit 재전달 흡수). `:peer` 2노드 `:pg` fan-out 통합 테스트.
+- **관측 계측 완성** — 정적 인터럽트 이벤트(`node.interrupt {kind}`) + `[:el_graph, :sensor, :signal]`.
+  SPEC §13 "잔여 계측"(checkpoint/Agent/Bus/Sensor/정적 인터럽트) 전부 종료.
+
+### Changed
+
+- **Dialyzer** — `el_graph_otel` 분리로 움브렐라 6개 앱 전부 0 경고.
+- **문서** — README 하이라이트에 신규 역량 반영(메모리/분산/MCP/관측), SPEC §11/§13 구현 정합화,
+  `Bus.Pg` 분산 운영 가이드(libcluster 호스트 위임).
+
+### Tooling
+
+- **ExDoc** — 루트 `mix docs`로 우산 전체 API 문서 + 가이드/설계 extras 생성. hex 패키지
+  메타데이터(`el_graph`: description/licenses/links).
+
 ## [0.2.0] — 2026-06-15
 
 2026 Agentic AI 트렌드 보고서(`docs/agentic-ai-2026-report.html`)를 근거로 한 기능 확장 +
