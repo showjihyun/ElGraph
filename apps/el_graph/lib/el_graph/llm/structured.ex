@@ -5,7 +5,7 @@ defmodule ElGraph.LLM.Structured do
   Instructor / Pydantic AI의 핵심 루프를 ElGraph LLM 추상화 위에 올린 것:
 
     1. 대화를 LLM에 보내 응답(JSON)을 받는다.
-    2. JSON을 디코드해 NimbleOptions 스키마로 검증한다(```json 코드펜스는 벗긴다).
+    2. JSON을 디코드해 NimbleOptions 스키마로 검증한다(코드펜스로 감싸여 오면 벗긴다).
     3. 실패하면 **검증 오류를 메시지로 되먹여** 재시도한다(`:max_retries`, 기본 2).
     4. 통과하면 `{:ok, %{data: 검증된_맵, usage: 누적_usage}}`.
 

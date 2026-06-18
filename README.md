@@ -2,9 +2,16 @@
 
 **한국어** | [English](README.en.md)
 
+[![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2Fshowjihyun%2FElGraph%2Fmain%2Fnotebooks%2Fgetting_started.livemd)
+
 > **BEAM(Elixir/OTP) 위에서 도는 graph-first 에이전트 프레임워크.**
 > Python 의존성 없이 LangGraph의 내구 실행·HITL(사람 개입)·체크포인트를 제공하고,
 > 그 위에 실시간 관측 UI(ElTrace)까지 얹는다.
+
+![ElTrace — 실시간 관측·HITL·time-travel](docs/assets/eltrace-demo.gif)
+
+*🎬 **ElTrace** — 에이전트 실행을 브라우저에서 실시간으로 보고, 인터럽트에서 **승인/거절**(HITL)하고,
+과거 시점에서 **"여기서 분기"**(time-travel)한다. 직접 보기: `cd apps/el_trace && mix phx.server` → http://localhost:4000*
 
 LLM 에이전트를 **상태 채널 + 노드 + 엣지**로 선언하면, ElGraph가 체크포인트 기반으로
 실행한다. 중간에 멈춰 사람의 승인을 받고(HITL), crash가 나도 마지막 지점부터 재개하며,
@@ -50,7 +57,10 @@ LLM 에이전트를 **상태 채널 + 노드 + 엣지**로 선언하면, ElGraph
 ### 1. 준비물
 
 - **Elixir 1.18+** / **Erlang/OTP 27+** (개발은 Elixir 1.20 / OTP 28에서 검증)
-- 설치가 처음이라면 → [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) (Windows `scoop` 절차 포함)
+- 설치 (택1):
+  - **macOS**: `brew install elixir`
+  - **Linux · macOS (버전 관리)**: [asdf](https://asdf-vm.com) (`asdf plugin add erlang && asdf plugin add elixir`)
+  - **Windows**: `scoop install erlang elixir` — 자세히는 [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md)
 
 설치 확인:
 
@@ -58,9 +68,27 @@ LLM 에이전트를 **상태 채널 + 노드 + 엣지**로 선언하면, ElGraph
 elixir --version    # Elixir 1.18 이상이면 OK
 ```
 
-### 2. 클론 + 의존성 + 테스트
+### 2. 설치
 
-이 저장소는 **우산(umbrella) 프로젝트**다 — 루트에서 한 번에 두 앱을 다룬다.
+**A) 내 프로젝트에 의존성으로 추가** — `mix.exs`:
+
+```elixir
+def deps do
+  [
+    # Hex 출시 전 — git 서브디렉터리에서:
+    {:el_graph, github: "showjihyun/ElGraph", sparse: "apps/el_graph"}
+    # Hex 출시 후:
+    # {:el_graph, "~> 0.3"}
+  ]
+end
+```
+
+> git·Hex 모두 공개라 **설치에 인증이 필요 없다** — `mix hex.user auth`는 패키지를 *올리는 사람*만의 단계다.
+
+코어 `el_graph`만으로 헤드리스(서버 없는) 에이전트 런타임이 된다. 내구 체크포인터(Postgres/Redis)·
+관측 UI(ElTrace)·A2A/AG-UI HTTP 서버는 형제 앱으로 분리돼 있다(아래 *프로젝트 구조* 참고).
+
+**B) ElGraph를 직접 클론해서 보거나 개발** — 이 저장소는 **우산(umbrella) 프로젝트**다:
 
 ```bash
 git clone https://github.com/showjihyun/ElGraph.git
@@ -95,6 +123,22 @@ ElGraph.invoke(graph, %{n: 10})
 
 노드는 `(state, ctx)`를 받아 **상태 부분 업데이트 맵**을 돌려준다. 그게 전부다.
 
+**키 없이 첫 에이전트** — `ElGraph.Test.ScriptedLLM`이 미리 정한 응답을 돌려주므로, API 키 없이
+ReAct 에이전트 루프를 그대로 돌려볼 수 있다:
+
+```elixir
+alias ElGraph.{LLM, Presets}
+alias ElGraph.Test.ScriptedLLM
+
+{:ok, pid} = ScriptedLLM.start_link([LLM.assistant("안녕하세요! 무엇을 도와드릴까요?")])
+graph = Presets.react({ScriptedLLM, pid}, [])
+
+ElGraph.invoke(graph, %{messages: [LLM.user("안녕")]})
+#=> {:ok, %{messages: [%{role: :user, ...}, %{role: :assistant, content: "안녕하세요! ..."}], ...}}
+```
+
+준비되면 실제 어댑터로 교체한다 — `ElGraph.LLM.OpenAI` / `.Anthropic` / `.Gemini`.
+
 ### 4. 관측 UI 띄우기 (추천 — 가장 직관적)
 
 ```bash
@@ -105,6 +149,8 @@ mix phx.server
 브라우저에서 **http://localhost:4000** 을 열면, 승인 대기 중인 예제 thread가 보인다.
 타임라인을 실시간으로 따라가며 **승인/거절**하거나, 특정 step에서 **여기서 분기**해
 "거절했다면?" 시나리오를 새 thread로 만들어 볼 수 있다.
+
+![ElTrace 타임라인 — 인터럽트에서 승인/거절·여기서 분기](docs/assets/eltrace-hero.png)
 
 > 브라우저 LiveView를 처음 띄울 땐 자바스크립트 자산을 한 번 빌드한다:
 > `mix esbuild el_trace` (또는 `mix phx.server`가 dev에서 자동 처리).
@@ -129,7 +175,7 @@ mix phx.server
 | 내구 실행·재개 | ✖ (범위 밖) | ✔ 라이브러리로 재구현 | ✔ **런타임과 한 몸** |
 | HITL · time-travel | ✖ | ✔ HITL / 되감기 일부 | ✔ HITL **+ 과거 시점 분기(fork)** |
 | 장애 격리·자기치유 | 앱코드 + 외부 인프라 | 앱코드 + 외부 인프라 | **Supervisor·프로세스 격리(언어 표준)** |
-| 동시성 | GIL 제약 | GIL 제약 | **전 코어·수만 동시(설계변경 0)** |
+| 동시성 | GIL 제약 | GIL 제약 | **전 코어·격리된 경량 프로세스** |
 | 의존성·배포 | 전이 의존성 다수 | 전이 의존성 다수 | 코어 의존성 **사실상 0**(`:telemetry`만)·단일 릴리스 |
 | 실시간 UI | 별도 구성 | 별도 구성 | **LiveView 동일 모델**(ElTrace·인프라 0) |
 
@@ -138,7 +184,7 @@ mix phx.server
 
 | 평가 항목 | LangGraph (Python) | **ElGraph (Elixir/BEAM)** | ElGraph 이점 |
 |---|---|---|---|
-| **동시 실행** | asyncio 이벤트 루프 / GIL로 CPU 단일코어 | 경량 프로세스 수백만 개, 전 코어 자동 활용 | ✅ 동시 수만 에이전트가 **설계 변경 0**으로 동작 |
+| **동시 실행** | asyncio 이벤트 루프 / GIL로 CPU 단일코어 | 경량 프로세스 수백만 개, 전 코어 자동 활용 | ◐ 격리·상태 보존엔 강함; 순수 I/O 바운드 fan-out은 asyncio도 충분 |
 | **API 모양** | `invoke`/`ainvoke` 이중 API (colored functions) | 선점형 스케줄링 → **단일 API** | ✅ "동기/비동기 함수 색깔" 문제 자체가 없음 |
 | **장애 격리** | 모든 경계에 `try/except`, 놓치면 전체 전파 | 프로세스 격리 + Supervisor 트리 (crash-only) | ✅ 한 에이전트의 죽음이 다른 에이전트를 못 죽임 |
 | **자기 치유** | K8s 재시작·Celery 재시도 등 **외부 인프라** 필요 | 슈퍼바이저 재시작 + 체크포인트 복구가 **언어 표준** | ✅ 장수명 에이전트의 복구가 프레임워크 안에서 성립 |
@@ -155,6 +201,18 @@ Python 우선이고, 커뮤니티·튜토리얼·인력 풀도 압도적이다. 
 — 오케스트레이터가 모델을 직접 실행할 일은 없으므로 이 우회는 구조적으로 타당하다.
 (임베딩/토크나이저는 API의 `usage` 응답이나 MCP 툴로 흡수.)
 
+**"Python 두뇌, Elixir 신경계."** 2026년 실전 패턴은 둘 중 하나를 고르는 게 아니라 역할 분담이다 —
+모델(추론·임베딩·파인튜닝)은 Python/호스티드 API에 두고, ElGraph는 그것을 호출하는 *내구·동시·관측
+가능한 오케스트레이션 층*을 맡는다(MCP·A2A·HTTP로 연결). ElGraph는 ML 스택을 대체하려 하지 않는다.
+
+**BEAM 동시성도 솔직하게.** 위 표들은 BEAM이 *할 수 있는 것*(수만 동시·전 코어)을 보여준다 — 다만 그게
+*언제 실익인지*는 구분하는 게 정직하다. 단순 요청→LLM→응답처럼 *네트워크 대기(I/O 바운드)*가 전부인
+워크로드에선 BEAM의 이점이 크지 않다: Python asyncio도 수천 동시 호출을 충분히 처리하고, 실제 병목은
+보통 모델/GPU 용량이지 오케스트레이터 런타임이 아니다. BEAM이 *결정적으로* 앞서는 지점은 따로 있다 —
+**장애 격리**(한 대화가 죽어도 나머지 수천이 계속), **선점 스케줄링**(폭주 노드가 다른 에이전트를 굶기지
+않음), **상태 보존 장수명 세션**(Phoenix가 서버당 10만+ 동시 연결을 버티는 그 모델), **내구 실행·분산**.
+즉 "더 많은 동시 호출"이 아니라 **격리·내구·상태 보존**이 진짜 우위다.
+
 ### 그래서, 언제 ElGraph인가
 
 - ✅ **동시 1만+ 에이전트 / 장수명("항상 살아있는") 에이전트 / 자기 치유**가 필요할 때
@@ -167,17 +225,31 @@ Python 우선이고, 커뮤니티·튜토리얼·인력 풀도 압도적이다. 
 > 전체 항목별 상세 비교(동시성·정확성·장애복구·스트리밍·분산·배포)는
 > [`docs/elixir-vs-python-comparison.md`](docs/elixir-vs-python-comparison.md).
 
+### Elixir 생태계에서 — 어디에 서는가
+
+같은 BEAM 위에도 좋은 에이전트 도구가 있다. ElGraph의 자리는 *그래프 실행기*다:
+
+- **Jido** (성숙·~1.7k★) — 불변 함수형 에이전트 + 시그널/FSM. persistence·checkpoints·HITL도 있지만 *전체 에이전트 스냅샷*(hibernate/thaw)이지 노드 단위 버전 체크포인트·pending writes가 아니고, 조건/순환 그래프 실행기는 아니다.
+- **sagents** (brainlid/langchain 기반) — HITL 승인이 강점이나 실행이 *고정 선형 파이프라인*이고 체크포인트는 종료시점 저장이다(중간 step 재개 아님).
+- **Oban Pro Workflows** — 진짜 내구 동적 fan-out/fan-in. 단 *유료·비순환(DAG)*이고 그래프-상태 체크포인트·HITL이 없다.
+
+ElGraph만의 조합: **노드 단위 버전 체크포인트 + pending writes + 인터럽트 HITL + 조건/순환 그래프 위 동적 fan-out**을 한 런타임에서, 오픈 코어로. 단일 축이 아니라 *이 묶음*이 차별점이다.
+
 ## 📦 프로젝트 구조
 
 ```
 ElGraph/                  # 우산 루트 (여기서 mix test / mix format)
 ├─ apps/
 │  ├─ el_graph/           # 코어 런타임 — 그래프·체크포인트·에이전트·LLM/MCP (의존성 0)
+│  ├─ el_graph_web/       # A2A(JSON-RPC)·AG-UI(SSE) HTTP 서버 — Plug/Bandit
 │  ├─ el_trace/           # 관측 UI — Phoenix/LiveView (el_graph에 의존)
 │  ├─ el_graph_ecto/      # 내구 체크포인터 — Postgres (Ecto)
-│  └─ el_graph_redis/     # 내구 체크포인터 — Valkey/Redis (Redix)
+│  ├─ el_graph_redis/     # 내구 체크포인터 — Valkey/Redis (Redix)
+│  └─ el_graph_otel/      # OTel SDK 브리지 — telemetry→OTel/Langfuse
 ├─ examples/
 │  └─ observed_agent/     # el_graph+el_trace를 "의존성으로 끌어다 쓰는" 예제
+├─ notebooks/             # Livebook 예제 (브라우저에서 바로 실행)
+│  └─ getting_started.livemd
 ├─ config/                # 공유 설정 (secrets.exs는 gitignore)
 ├─ docker-compose.yml     # DB 백엔드 테스트용 Postgres/Valkey
 └─ docs/                  # 설계 전문·환경·테스트 규약

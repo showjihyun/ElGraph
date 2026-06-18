@@ -2,9 +2,16 @@
 
 [한국어](README.md) | **English**
 
+[![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2Fshowjihyun%2FElGraph%2Fmain%2Fnotebooks%2Fgetting_started.livemd)
+
 > **A graph-first agent framework running on the BEAM (Elixir/OTP).**
 > Delivers LangGraph-style durable execution, human-in-the-loop, and checkpointing
 > with zero Python dependency — and adds a real-time observability UI (ElTrace) on top.
+
+![ElTrace — real-time observability, HITL, time-travel](docs/assets/eltrace-demo.gif)
+
+*🎬 **ElTrace** — watch agent runs live, **approve/reject** at interrupts (HITL), and **"branch here"**
+from any past step (time-travel). See it yourself: `cd apps/el_trace && mix phx.server` → http://localhost:4000*
 
 Declare an LLM agent as **state channels + nodes + edges**, and ElGraph runs it on
 checkpoints. It can pause for human approval (HITL), resume from the last point after a
@@ -51,7 +58,10 @@ user input ─▶ [run graph] ─▶ checkpoint after every step
 ### 1. Prerequisites
 
 - **Elixir 1.18+** / **Erlang/OTP 27+** (developed & verified on Elixir 1.20 / OTP 28)
-- New to the toolchain? → [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) (includes a Windows `scoop` walkthrough)
+- Install (pick one):
+  - **macOS**: `brew install elixir`
+  - **Linux · macOS (version-managed)**: [asdf](https://asdf-vm.com) (`asdf plugin add erlang && asdf plugin add elixir`)
+  - **Windows**: `scoop install erlang elixir` — details in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md)
 
 Verify your install:
 
@@ -59,9 +69,28 @@ Verify your install:
 elixir --version    # Elixir 1.18 or newer is fine
 ```
 
-### 2. Clone + deps + tests
+### 2. Install
 
-This repo is an **umbrella project** — you drive both apps from the root.
+**A) Add it to your project as a dependency** — `mix.exs`:
+
+```elixir
+def deps do
+  [
+    # Before the Hex release — from the git subdirectory:
+    {:el_graph, github: "showjihyun/ElGraph", sparse: "apps/el_graph"}
+    # After the Hex release:
+    # {:el_graph, "~> 0.3"}
+  ]
+end
+```
+
+> Both git and Hex are public, so **installing needs no auth** — `mix hex.user auth` is a publisher-only step.
+
+The core `el_graph` alone is a headless (server-less) agent runtime. The durable checkpointers
+(Postgres/Redis), the observability UI (ElTrace), and the A2A/AG-UI HTTP server are separate
+sibling apps (see *Project structure* below).
+
+**B) Clone ElGraph itself to explore or develop it** — this repo is an **umbrella project**:
 
 ```bash
 git clone https://github.com/showjihyun/ElGraph.git
@@ -96,6 +125,22 @@ ElGraph.invoke(graph, %{n: 10})
 
 A node takes `(state, ctx)` and returns a **partial state-update map**. That's the whole model.
 
+**Your first agent — no API key.** `ElGraph.Test.ScriptedLLM` returns canned responses, so you
+can run the full ReAct agent loop with zero credentials:
+
+```elixir
+alias ElGraph.{LLM, Presets}
+alias ElGraph.Test.ScriptedLLM
+
+{:ok, pid} = ScriptedLLM.start_link([LLM.assistant("Hi! How can I help?")])
+graph = Presets.react({ScriptedLLM, pid}, [])
+
+ElGraph.invoke(graph, %{messages: [LLM.user("hello")]})
+#=> {:ok, %{messages: [%{role: :user, ...}, %{role: :assistant, content: "Hi! How can I help?"}], ...}}
+```
+
+Swap in a real adapter when you're ready — `ElGraph.LLM.OpenAI` / `.Anthropic` / `.Gemini`.
+
 ### 4. Launch the observability UI (recommended — most intuitive)
 
 ```bash
@@ -106,6 +151,8 @@ mix phx.server
 Open **http://localhost:4000** and you'll see an example thread waiting for approval.
 Follow the timeline in real time and **approve/reject** it, or **branch here** at a specific
 step to spin up a "what if I'd rejected?" scenario as a new thread.
+
+![ElTrace timeline — approve/reject and branch-here at an interrupt](docs/assets/eltrace-hero.png)
 
 > The first browser run builds the JavaScript assets once:
 > `mix esbuild el_trace` (or `mix phx.server` handles it automatically in dev).
@@ -131,7 +178,7 @@ step to spin up a "what if I'd rejected?" scenario as a new thread.
 | Durable exec·resume | ✖ (out of scope) | ✔ reimplemented as a library | ✔ **one with the runtime** |
 | HITL · time-travel | ✖ | ✔ HITL / partial rewind | ✔ HITL **+ fork from a past point** |
 | Fault isolation·self-healing | app code + external infra | app code + external infra | **Supervisor·process isolation (language standard)** |
-| Concurrency | GIL-bound | GIL-bound | **all cores·tens of thousands concurrent (zero redesign)** |
+| Concurrency | GIL-bound | GIL-bound | **all cores·isolated lightweight processes** |
 | Dependencies·deploy | many transitive deps | many transitive deps | **effectively zero** core deps (`:telemetry` only)·single release |
 | Real-time UI | bolt-on | bolt-on | **same LiveView model** (ElTrace·zero infra) |
 
@@ -141,7 +188,7 @@ runtime) has been solving in telecom switches for 30 years.
 
 | Dimension | LangGraph (Python) | **ElGraph (Elixir/BEAM)** | ElGraph advantage |
 |---|---|---|---|
-| **Concurrency** | asyncio event loop / GIL pins CPU to one core | millions of lightweight processes, all cores used automatically | ✅ tens of thousands of concurrent agents with **zero design change** |
+| **Concurrency** | asyncio event loop / GIL pins CPU to one core | millions of lightweight processes, all cores used automatically | ◐ strong for isolation/statefulness; pure I/O-bound fan-out is fine on asyncio too |
 | **API shape** | dual `invoke`/`ainvoke` API (colored functions) | preemptive scheduling → **a single API** | ✅ the "sync/async function color" problem simply doesn't exist |
 | **Fault isolation** | `try/except` at every boundary; a miss propagates everywhere | process isolation + supervisor trees (crash-only) | ✅ one agent's death can't take down the others |
 | **Self-healing** | needs **external infra** (K8s restarts, Celery retries) | supervisor restarts + checkpoint recovery are **language standard** | ✅ long-lived agent recovery lives inside the framework |
@@ -159,6 +206,22 @@ ElGraph **routes around this via HTTP APIs + MCP** — an orchestrator never nee
 model itself, so the workaround is structurally sound. (Embeddings/tokenization are absorbed
 through the API's `usage` response or MCP tools.)
 
+**"Python brain, Elixir nervous system."** The pragmatic 2026 pattern isn't either/or — it's a
+division of labor: keep the model (inference, embeddings, fine-tuning) on Python/hosted APIs,
+and let ElGraph be the *durable, concurrent, observable orchestration layer* that calls them
+(over MCP, A2A, HTTP). ElGraph does not try to replace the ML stack.
+
+**On BEAM concurrency, honestly.** The tables above show what the BEAM *can* do (tens of
+thousands concurrent, all cores) — but it's fair to say *when* that pays off. For workloads
+that are pure network-wait (a simple request→LLM→response), the BEAM edge is small: Python
+asyncio handles thousands of concurrent calls just fine, and the real bottleneck is usually
+model/GPU capacity, not the orchestrator runtime. Where the BEAM *decisively* wins is
+elsewhere — **fault isolation** (one conversation crashing while thousands continue),
+**preemptive scheduling** (a runaway node can't starve the others), **stateful long-lived
+sessions** (the same model that lets Phoenix hold 100k+ concurrent connections per server),
+and **durable execution + distribution**. The real advantage is **isolation, durability, and
+statefulness** — not "more concurrent calls."
+
 ### So, when should you pick ElGraph?
 
 - ✅ When you need **10k+ concurrent agents / long-lived ("always alive") agents / self-healing**
@@ -172,17 +235,31 @@ the Python ecosystem is your core need, LangGraph is the more comfortable choice
 > Full dimension-by-dimension comparison (concurrency, correctness, fault recovery,
 > streaming, distribution, deployment): [`docs/elixir-vs-python-comparison.md`](docs/elixir-vs-python-comparison.md).
 
+### Where it sits in the Elixir ecosystem
+
+There are good agent tools on the BEAM too. ElGraph's seat is the *graph executor*:
+
+- **Jido** (mature, ~1.7k★) — immutable functional agents + signals/FSM. It has persistence, checkpoints, and HITL too, but as *whole-agent snapshots* (hibernate/thaw), not per-step versioned checkpoints with pending writes, and it isn't a conditional/cyclic graph executor.
+- **sagents** (built on brainlid/langchain) — strong HITL approvals, but execution is a *fixed linear pipeline* and checkpoints are terminal-point save/restore (no mid-graph resume).
+- **Oban Pro Workflows** — genuine durable dynamic fan-out/fan-in, but *paid, acyclic (DAG)*, with no graph-state checkpoints or HITL.
+
+ElGraph's combination: **per-step versioned checkpoints + pending writes + interrupt HITL + dynamic fan-out over a conditional/cyclic graph**, in one runtime, open-core. The moat is *the bundle*, not any single axis.
+
 ## 📦 Project structure
 
 ```
 ElGraph/                  # umbrella root (run mix test / mix format here)
 ├─ apps/
 │  ├─ el_graph/           # core runtime — graph, checkpoints, agents, LLM/MCP (zero deps)
+│  ├─ el_graph_web/       # A2A (JSON-RPC) · AG-UI (SSE) HTTP server — Plug/Bandit
 │  ├─ el_trace/           # observability UI — Phoenix/LiveView (depends on el_graph)
 │  ├─ el_graph_ecto/      # durable checkpointer — Postgres (Ecto)
-│  └─ el_graph_redis/     # durable checkpointer — Valkey/Redis (Redix)
+│  ├─ el_graph_redis/     # durable checkpointer — Valkey/Redis (Redix)
+│  └─ el_graph_otel/      # OTel SDK bridge — telemetry → OTel/Langfuse
 ├─ examples/
 │  └─ observed_agent/     # example of consuming el_graph + el_trace as dependencies
+├─ notebooks/             # Livebook examples (run instantly in the browser)
+│  └─ getting_started.livemd
 ├─ config/                # shared config (secrets.exs is gitignored)
 ├─ docker-compose.yml     # Postgres/Valkey for DB-backend tests
 └─ docs/                  # full design spec, environment, testing conventions

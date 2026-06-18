@@ -13,7 +13,12 @@ defmodule ElGraphOtel.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      dialyzer: dialyzer()
+      dialyzer: dialyzer(),
+      description:
+        "OpenTelemetry SDK bridge for ElGraph — telemetry spans to OTel/Langfuse via " <>
+          "GenAI semantic conventions.",
+      source_url: "https://github.com/showjihyun/ElGraph",
+      package: package()
     ]
   end
 
@@ -23,6 +28,17 @@ defmodule ElGraphOtel.MixProject do
     [
       ignore_warnings: ".dialyzer_ignore.exs",
       flags: [:error_handling, :missing_return]
+    ]
+  end
+
+  # hex 패키지 메타데이터. 출시 시 {:el_graph, in_umbrella: true} → {:el_graph, "~> 0.3"} 로
+  # 교체해야 hex.publish 가능(Hex는 umbrella/path 의존성 거부). 코어(el_graph) 우선 출시 후 형제 앱.
+  defp package do
+    [
+      licenses: ["MIT"],
+      maintainers: ["Poor Coin Pepe"],
+      links: %{"GitHub" => "https://github.com/showjihyun/ElGraph"},
+      files: ~w(lib mix.exs)
     ]
   end
 

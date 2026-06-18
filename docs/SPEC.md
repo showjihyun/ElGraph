@@ -15,7 +15,14 @@
 
 **정체성: graph-first 에이전트 프레임워크.** Jido(액션/시그널 중심)와 달리 그래프 오케스트레이션이 코어 자산이며, 에이전트 런타임은 그 위에 쌓는다.
 
-기존 Elixir 생태계와의 구분 (2026-06 조사): **Agens**는 LangChain/CrewAI 영감의 초기 단계(v0.1.x) 라이브러리로 GenServer 중심 멀티 에이전트 잡 흐름이고, **brainlid/langchain**은 LLM 통합/체인이지 그래프 실행기가 아니다. **버전 있는 체크포인트·pending writes·HITL·동적 fan-out을 갖춘 충실한 LangGraph 급 그래프 실행기는 Elixir에 없다** — 이것이 L1의 존재 이유. brainlid/langchain은 경쟁자가 아니라 L2 LLM 어댑터 후보로 재사용을 검토한다.
+기존 Elixir 생태계와의 구분 (2026-06 조사, 2026-06-18 갱신): 경쟁 지형은 빠르게 움직였다 — 개별 축은 경쟁자가 좁혀오므로 차별점을 "조합"으로 정밀하게 말한다.
+
+- **Jido** — 이제 성숙한 v2.x(~1.7k★, 활발)로 persistence·checkpoints·HITL을 갖췄다. 단, *전체 에이전트* hibernate/thaw 스냅샷 + append-only 저널 + 낙관적 동시성이지 **노드 단위 버전 체크포인트·pending writes가 아니며**, 모델은 action/signal/FSM이지 조건/순환 그래프 실행기가 아니다. (SPEC 초기의 "초기 단계 action/signal" 서술은 낡았다.)
+- **sagents** (v0.8.0, brainlid/langchain 기반) — HITL 승인 + "graph execution" + "durable checkpoints"를 표방. 단, 그래프가 *고정 선형 파이프라인*이고 체크포인트는 *종료시점 save/restore*다(중간 step 재개·pending writes 아님).
+- **Oban Pro Workflows** — 진짜 내구 동적 fan-out/fan-in을 준다. 단, *유료·비순환(DAG, 사이클 없음)*이고 그래프-상태 체크포인트·HITL이 없다(잡 단위 영속).
+- **Agens** — 노드 그래프 Job(+`{:route, id, count}` fan-out)이나 체크포인트·HITL·내구 재개가 없고 트래픽이 낮다. **brainlid/langchain** — 선형 LLMChain이라 경쟁자가 아니라 L2 LLM 어댑터 후보(현재는 자체 Req 어댑터 채택, §11).
+
+정리: **노드 단위 버전 체크포인트 + pending writes + 인터럽트 HITL + 조건/순환 그래프 위 동적 fan-out을, 단일 런타임에 오픈 코어로 묶은 Elixir 패키지는 아직 없다** — 이것이 L1의 존재 이유다. ("Elixir에 LangGraph 급이 전무하다"는 절대 표현은 피한다 — Jido(HITL/체크포인트)·sagents(HITL)·Oban Pro(내구 DAG)가 개별 축에서 겹친다.)
 
 | 원칙 | 내용 |
 |---|---|
