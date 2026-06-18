@@ -15,10 +15,14 @@ Python 없음.
 
 ## 설치
 
+아직 Hex 미출시 — git 의존성으로 가져온다(공개 저장소라 **설치 인증 불필요**):
+
 ```elixir
 def deps do
   [
-    {:el_graph, "~> 0.3"}
+    # 우산 서브앱이라 sparse로 코어만 가져온다:
+    {:el_graph, github: "showjihyun/ElGraph", sparse: "apps/el_graph"}
+    # (향후 Hex 출시 시) {:el_graph, "~> 0.3"}
   ]
 end
 ```

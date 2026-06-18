@@ -76,6 +76,8 @@ def deps do
 end
 ```
 
+> git·Hex 모두 공개라 **설치에 인증이 필요 없다** — `mix hex.user auth`는 패키지를 *올리는 사람*만의 단계다.
+
 코어 `el_graph`만으로 헤드리스(서버 없는) 에이전트 런타임이 된다. 내구 체크포인터(Postgres/Redis)·
 관측 UI(ElTrace)·A2A/AG-UI HTTP 서버는 형제 앱으로 분리돼 있다(아래 *프로젝트 구조* 참고).
 

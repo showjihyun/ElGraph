@@ -77,6 +77,8 @@ def deps do
 end
 ```
 
+> Both git and Hex are public, so **installing needs no auth** — `mix hex.user auth` is a publisher-only step.
+
 The core `el_graph` alone is a headless (server-less) agent runtime. The durable checkpointers
 (Postgres/Redis), the observability UI (ElTrace), and the A2A/AG-UI HTTP server are separate
 sibling apps (see *Project structure* below).
