@@ -31,7 +31,9 @@ defmodule ElGraph.MCP.Server do
   @type deps :: %{
           required(:tools) => [module()],
           required(:server_info) => map(),
-          optional(:context) => term()
+          optional(:context) => term(),
+          optional(:resources) => [map()],
+          optional(:prompts) => [map()]
         }
   @type result :: {:result, map()} | {:error, integer(), String.t()} | :notification
 
@@ -40,13 +42,45 @@ defmodule ElGraph.MCP.Server do
     {:result,
      %{
        "protocolVersion" => @protocol_version,
-       "capabilities" => %{"tools" => %{}},
+       "capabilities" => capabilities(deps),
        "serverInfo" => deps.server_info
      }}
   end
 
   def handle("tools/list", _params, deps) do
     {:result, %{"tools" => Enum.map(deps.tools, &tool_descriptor/1)}}
+  end
+
+  def handle("resources/list", _params, deps) do
+    {:result, %{"resources" => Enum.map(resources(deps), &resource_descriptor/1)}}
+  end
+
+  def handle("resources/read", %{"uri" => uri}, deps) do
+    case Enum.find(resources(deps), &(&1.uri == uri)) do
+      nil ->
+        {:error, -32602, "Unknown resource: #{uri}"}
+
+      resource ->
+        case read_resource(resource) do
+          {:ok, text} ->
+            {:result,
+             %{"contents" => [%{"uri" => uri, "mimeType" => mime_type(resource), "text" => text}]}}
+
+          {:error, reason} ->
+            {:error, -32603, "Resource read failed: #{inspect(reason)}"}
+        end
+    end
+  end
+
+  def handle("prompts/list", _params, deps) do
+    {:result, %{"prompts" => Enum.map(prompts(deps), &prompt_descriptor/1)}}
+  end
+
+  def handle("prompts/get", %{"name" => name} = params, deps) do
+    case Enum.find(prompts(deps), &(&1.name == name)) do
+      nil -> {:error, -32602, "Unknown prompt: #{name}"}
+      prompt -> {:result, render_prompt(prompt, Map.get(params, "arguments", %{}))}
+    end
   end
 
   def handle("tools/call", %{"name" => name} = params, deps) do
@@ -65,9 +99,59 @@ defmodule ElGraph.MCP.Server do
 
   def handle(_method, _params, _deps), do: {:error, -32600, "Invalid Request"}
 
+  defp capabilities(deps) do
+    %{"tools" => %{}}
+    |> maybe_capability(resources(deps), "resources")
+    |> maybe_capability(prompts(deps), "prompts")
+  end
+
+  defp maybe_capability(caps, [], _key), do: caps
+  defp maybe_capability(caps, [_ | _], key), do: Map.put(caps, key, %{})
+
+  defp resources(deps), do: Map.get(deps, :resources, [])
+  defp prompts(deps), do: Map.get(deps, :prompts, [])
+
   defp tool_descriptor(module) do
     spec = Action.to_tool_spec(module)
     %{"name" => spec.name, "description" => spec.description, "inputSchema" => spec.input_schema}
+  end
+
+  defp resource_descriptor(resource) do
+    %{
+      "uri" => resource.uri,
+      "name" => resource.name,
+      "description" => Map.get(resource, :description),
+      "mimeType" => mime_type(resource)
+    }
+  end
+
+  defp mime_type(resource), do: Map.get(resource, :mime_type, "text/plain")
+
+  defp read_resource(resource) do
+    case resource.read.() do
+      {:ok, text} -> {:ok, text}
+      {:error, _reason} = error -> error
+      text when is_binary(text) -> {:ok, text}
+    end
+  end
+
+  defp prompt_descriptor(prompt) do
+    %{
+      "name" => prompt.name,
+      "description" => Map.get(prompt, :description),
+      "arguments" => Map.get(prompt, :arguments, [])
+    }
+  end
+
+  defp render_prompt(prompt, arguments) do
+    messages =
+      arguments
+      |> prompt.render.()
+      |> Enum.map(fn %{role: role, text: text} ->
+        %{"role" => role, "content" => %{"type" => "text", "text" => text}}
+      end)
+
+    %{"description" => Map.get(prompt, :description), "messages" => messages}
   end
 
   defp call_tool(module, arguments, context) do

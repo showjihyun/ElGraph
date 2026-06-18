@@ -161,4 +161,8 @@ T2.6 메모리를 보고서 야심(temporal·외부 메모리 흡수·영속)까
   종단 루프백 테스트(StreamableHTTP 클라이언트 → 실제 `MCP.Router` → `Server` → Action,
   Req `:plug`=Router로 포트 없이 in-process E2E). A2A TaskStore async 격리 flake도 수정.
 
-스위트: el_graph 513 · el_graph_web 50, Dialyzer 0.
+- **MCP resources/prompts**: `ElGraph.MCP.Server`에 `resources/list`·`resources/read`,
+  `prompts/list`·`prompts/get` 추가(initialize capabilities 동적 광고). Router가
+  `mcp_resources`/`mcp_prompts` assigns로 주입. tools 외 MCP 표면 확장.
+
+스위트: el_graph 521 · el_graph_web 50, Dialyzer 0.

@@ -8,6 +8,8 @@ defmodule ElGraphWeb.MCP.Router do
   주입(상위 plug 또는 테스트의 `assign`):
 
     * `:mcp_tools`       — 노출할 `ElGraph.Action` 모듈 목록 (필수)
+    * `:mcp_resources`   — `ElGraph.MCP.Server` resource 스펙 목록 (선택)
+    * `:mcp_prompts`     — `ElGraph.MCP.Server` prompt 스펙 목록 (선택)
     * `:mcp_server_info` — `%{"name" => ..., "version" => ...}` (선택)
     * `:mcp_context`     — Action `run/2` 컨텍스트 (선택)
 
@@ -33,6 +35,8 @@ defmodule ElGraphWeb.MCP.Router do
 
     deps = %{
       tools: conn.assigns[:mcp_tools] || [],
+      resources: conn.assigns[:mcp_resources] || [],
+      prompts: conn.assigns[:mcp_prompts] || [],
       server_info: conn.assigns[:mcp_server_info] || @default_server_info,
       context: conn.assigns[:mcp_context] || %{}
     }
