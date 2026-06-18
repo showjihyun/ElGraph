@@ -64,4 +64,43 @@ defmodule ElGraphWeb.MCP.RouterTest do
     assert conn.status == 202
     assert conn.resp_body == ""
   end
+
+  describe "input guardrails on tools/call" do
+    defp call_guarded(body, guards) do
+      conn(:post, "/", Jason.encode!(body))
+      |> put_req_header("content-type", "application/json")
+      |> assign(:mcp_tools, [Echo])
+      |> assign(:guardrails, guards)
+      |> Router.call(Router.init([]))
+    end
+
+    test "blocks a tools/call whose arguments trip a guard (JSON-RPC -32602)" do
+      guards = [ElGraph.Guardrail.deny(~r/secret/, :forbidden)]
+
+      body = %{
+        "jsonrpc" => "2.0",
+        "id" => 9,
+        "method" => "tools/call",
+        "params" => %{"name" => "echo", "arguments" => %{"text" => "my secret"}}
+      }
+
+      conn = call_guarded(body, guards)
+      assert conn.status == 200
+      assert %{"id" => 9, "error" => %{"code" => -32602}} = Jason.decode!(conn.resp_body)
+    end
+
+    test "allows a tools/call whose arguments are clean" do
+      guards = [ElGraph.Guardrail.deny(~r/secret/, :forbidden)]
+
+      body = %{
+        "jsonrpc" => "2.0",
+        "id" => 10,
+        "method" => "tools/call",
+        "params" => %{"name" => "echo", "arguments" => %{"text" => "hello"}}
+      }
+
+      conn = call_guarded(body, guards)
+      assert %{"result" => %{"isError" => false}} = Jason.decode!(conn.resp_body)
+    end
+  end
 end

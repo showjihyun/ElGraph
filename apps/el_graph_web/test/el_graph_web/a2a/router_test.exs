@@ -74,7 +74,9 @@ defmodule ElGraphWeb.A2A.RouterTest do
 
   describe "POST /:name (JSON-RPC 2.0)" do
     setup do
-      %{store: start_supervised!(TaskStore)}
+      # async 테스트 간 이름 충돌 방지 — 테스트별 고유 이름으로 격리.
+      name = :"task_store_#{System.unique_integer([:positive])}"
+      %{store: start_supervised!({TaskStore, name: name})}
     end
 
     defp rpc_body(method, params, id) do

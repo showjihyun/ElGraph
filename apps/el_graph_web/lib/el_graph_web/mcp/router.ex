@@ -18,6 +18,7 @@ defmodule ElGraphWeb.MCP.Router do
   use Plug.Router
 
   alias ElGraph.MCP.Server
+  alias ElGraphWeb.Guardrails
 
   @default_server_info %{"name" => "el_graph", "version" => "0.2.0"}
 
@@ -27,6 +28,8 @@ defmodule ElGraphWeb.MCP.Router do
 
   post "/" do
     body = conn.body_params
+    method = Map.get(body, "method")
+    params = Map.get(body, "params", %{})
 
     deps = %{
       tools: conn.assigns[:mcp_tools] || [],
@@ -34,7 +37,32 @@ defmodule ElGraphWeb.MCP.Router do
       context: conn.assigns[:mcp_context] || %{}
     }
 
-    case Server.handle(Map.get(body, "method"), Map.get(body, "params", %{}), deps) do
+    case guard(conn, method, params) do
+      {:blocked, reason} ->
+        error = %{
+          "code" => -32602,
+          "message" => "Invalid params: guardrail blocked (#{inspect(reason)})"
+        }
+
+        send_json(conn, envelope(Map.get(body, "id"), error: error))
+
+      :ok ->
+        dispatch_rpc(conn, body, method, params, deps)
+    end
+  end
+
+  # tools/call의 인자를 입력 가드레일로 검사한다(A2A와 동일 — PII/콘텐츠 필터).
+  defp guard(conn, "tools/call", %{"arguments" => args}) do
+    case Guardrails.check(conn, Jason.encode!(args)) do
+      {:ok, _} -> :ok
+      blocked -> blocked
+    end
+  end
+
+  defp guard(_conn, _method, _params), do: :ok
+
+  defp dispatch_rpc(conn, body, method, params, deps) do
+    case Server.handle(method, params, deps) do
       :notification ->
         send_resp(conn, 202, "")
 

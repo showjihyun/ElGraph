@@ -157,4 +157,8 @@ T2.6 메모리를 보고서 야심(temporal·외부 메모리 흡수·영속)까
   (sampling/elicitation/roots 광고 + 디스패치) + `ElGraph.MCP.Client.Receiver`(SSE 수신 루프 —
   서버 개시 요청을 받아 응답을 POST로 되돌림). 기존엔 behaviour만 존재. sampling/elicitation/roots **라이브**.
 
-스위트: el_graph 513 · el_graph_web 47, Dialyzer 0.
+- **MCP 마감**: 서버 `tools/call`에 입력 가드레일(A2A와 동일 — PII/콘텐츠, 차단 시 -32602) +
+  종단 루프백 테스트(StreamableHTTP 클라이언트 → 실제 `MCP.Router` → `Server` → Action,
+  Req `:plug`=Router로 포트 없이 in-process E2E). A2A TaskStore async 격리 flake도 수정.
+
+스위트: el_graph 513 · el_graph_web 50, Dialyzer 0.
