@@ -8,6 +8,11 @@
 > Delivers LangGraph-style durable execution, human-in-the-loop, and checkpointing
 > with zero Python dependency — and adds a real-time observability UI (ElTrace) on top.
 
+![ElTrace — real-time observability, HITL, time-travel](docs/assets/eltrace-demo.gif)
+
+*🎬 **ElTrace** — watch agent runs live, **approve/reject** at interrupts (HITL), and **"branch here"**
+from any past step (time-travel). See it yourself: `cd apps/el_trace && mix phx.server` → http://localhost:4000*
+
 Declare an LLM agent as **state channels + nodes + edges**, and ElGraph runs it on
 checkpoints. It can pause for human approval (HITL), resume from the last point after a
 crash, and rewind to any past step to safely explore "what if I'd gone differently?".
@@ -146,6 +151,8 @@ mix phx.server
 Open **http://localhost:4000** and you'll see an example thread waiting for approval.
 Follow the timeline in real time and **approve/reject** it, or **branch here** at a specific
 step to spin up a "what if I'd rejected?" scenario as a new thread.
+
+![ElTrace timeline — approve/reject and branch-here at an interrupt](docs/assets/eltrace-hero.png)
 
 > The first browser run builds the JavaScript assets once:
 > `mix esbuild el_trace` (or `mix phx.server` handles it automatically in dev).

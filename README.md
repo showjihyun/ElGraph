@@ -8,6 +8,11 @@
 > Python 의존성 없이 LangGraph의 내구 실행·HITL(사람 개입)·체크포인트를 제공하고,
 > 그 위에 실시간 관측 UI(ElTrace)까지 얹는다.
 
+![ElTrace — 실시간 관측·HITL·time-travel](docs/assets/eltrace-demo.gif)
+
+*🎬 **ElTrace** — 에이전트 실행을 브라우저에서 실시간으로 보고, 인터럽트에서 **승인/거절**(HITL)하고,
+과거 시점에서 **"여기서 분기"**(time-travel)한다. 직접 보기: `cd apps/el_trace && mix phx.server` → http://localhost:4000*
+
 LLM 에이전트를 **상태 채널 + 노드 + 엣지**로 선언하면, ElGraph가 체크포인트 기반으로
 실행한다. 중간에 멈춰 사람의 승인을 받고(HITL), crash가 나도 마지막 지점부터 재개하며,
 과거의 임의 시점으로 되감아 "다르게 가봤다면?"을 안전하게 탐색할 수 있다.
@@ -144,6 +149,8 @@ mix phx.server
 브라우저에서 **http://localhost:4000** 을 열면, 승인 대기 중인 예제 thread가 보인다.
 타임라인을 실시간으로 따라가며 **승인/거절**하거나, 특정 step에서 **여기서 분기**해
 "거절했다면?" 시나리오를 새 thread로 만들어 볼 수 있다.
+
+![ElTrace 타임라인 — 인터럽트에서 승인/거절·여기서 분기](docs/assets/eltrace-hero.png)
 
 > 브라우저 LiveView를 처음 띄울 땐 자바스크립트 자산을 한 번 빌드한다:
 > `mix esbuild el_trace` (또는 `mix phx.server`가 dev에서 자동 처리).
