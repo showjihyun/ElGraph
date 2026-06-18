@@ -33,6 +33,7 @@ defmodule ElGraph.SensorTelemetryTest do
       sensor = start_supervised!({QuietSensor, on_signal: fn _ -> :ok end})
 
       assert :ok = Sensor.tick(sensor)
+
       # 핸들러는 전역이라 다른 테스트의 센서 이벤트가 올 수 있다 — 자기 모듈만 부재 검증.
       refute_receive {[:el_graph, :sensor, :signal], ^ref, _, %{sensor: QuietSensor}}, 50
     end

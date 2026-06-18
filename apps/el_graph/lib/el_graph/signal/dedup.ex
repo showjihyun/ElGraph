@@ -36,7 +36,13 @@ defmodule ElGraph.Signal.Dedup do
     if MapSet.member?(seen, id) do
       {:duplicate, dedup}
     else
-      dedup = %{dedup | seen: MapSet.put(seen, id), order: [id | dedup.order], count: dedup.count + 1}
+      dedup = %{
+        dedup
+        | seen: MapSet.put(seen, id),
+          order: [id | dedup.order],
+          count: dedup.count + 1
+      }
+
       {:new, evict(dedup)}
     end
   end

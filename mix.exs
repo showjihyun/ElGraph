@@ -33,7 +33,7 @@ defmodule ElGraphUmbrella.MixProject do
       extras: [
         "README.md": [title: "Overview"],
         "CHANGELOG.md": [title: "Changelog"],
-        "LICENSE": [title: "License"],
+        LICENSE: [title: "License"],
         "docs/SPEC.md": [title: "SPEC"],
         "docs/elixir-vs-python-comparison.md": [title: "Elixir vs Python (LangGraph)"],
         "docs/ENVIRONMENT.md": [title: "Environment"],
