@@ -84,7 +84,7 @@ defmodule ElGraph.AGUI do
   @doc """
   ElGraph 스트림(Enumerable of `%{event: ...}`)을 AG-UI 이벤트 시퀀스로 변환한다.
 
-  앞에 RUN_STARTED를 붙이고, 토큰을 메시지로 프레이밍하며, 종료(`{:done, _}`/`{:down, _}`)
+  앞에 RUN_STARTED를 붙이고, 토큰을 메시지로 프레이밍하며, 종료(`:done` 또는 `:down`) 이벤트
   시 STATE_SNAPSHOT + RUN_FINISHED(또는 RUN_ERROR)로 마감한다. 입력이 lazy 스트림이면
   결과도 lazy다.
   """
