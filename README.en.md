@@ -255,6 +255,7 @@ ElGraph/                  # umbrella root (run mix test / mix format here)
 │  ├─ el_trace/           # observability UI — Phoenix/LiveView (depends on el_graph)
 │  ├─ el_graph_ecto/      # durable checkpointer — Postgres (Ecto)
 │  ├─ el_graph_redis/     # durable checkpointer — Valkey/Redis (Redix)
+│  ├─ el_graph_req_llm/   # LLM adapter — ~21 providers via ReqLLM
 │  └─ el_graph_otel/      # OTel SDK bridge — telemetry → OTel/Langfuse
 ├─ examples/
 │  └─ observed_agent/     # example of consuming el_graph + el_trace as dependencies
@@ -302,7 +303,7 @@ graph = ElGraph.Presets.react(llm, [MyApp.SearchAction], budget: [tokens: 100_00
 ```
 
 When the LLM calls a tool, it runs automatically and feeds the result back to the model in a
-loop. Adapters: `ElGraph.LLM.OpenAI` / `.Anthropic` / `.Gemini`, plus `ElGraph.Test.ScriptedLLM` for tests.
+loop. Adapters: `ElGraph.LLM.OpenAI` / `.Anthropic` / `.Gemini` (+ `.ReqLLM` — [ReqLLM](https://hex.pm/packages/req_llm) → ~21 providers / 1000+ models, via the `el_graph_req_llm` app), plus `ElGraph.Test.ScriptedLLM` for tests.
 
 ### Durable execution + human approval (HITL)
 
