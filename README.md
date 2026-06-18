@@ -30,11 +30,14 @@ LLM 에이전트를 **상태 채널 + 노드 + 엣지**로 선언하면, ElGraph
 ## ✨ 핵심 특징
 
 - **그래프 코어** — 상태 채널/reducer, 조건부 엣지, 병렬 fan-out, 서브그래프. 런타임 의존성은 `:telemetry` 하나.
-- **내구 실행** — 체크포인트 저장 → 재개. 부분 실패한 병렬 단계도 성공한 작업을 보존해 LLM 중복 호출을 막는다. 백엔드 교체 가능: **ETS**(인메모리) · **DETS·Mnesia**(BEAM 내장·무인프라 디스크 영속) · **Postgres** · **Valkey/Redis**. 전부 `keep: {:last, n}` 보존정책 지원.
+- **내구 실행** — 체크포인트 저장 → 재개. 부분 실패한 병렬 단계도 성공한 작업을 보존하고, `Ctx.memo/3` **task 메모이제이션**으로 재개·재시도 시 LLM/툴 호출을 재실행하지 않는다. 백엔드 교체 가능: **ETS**(인메모리) · **DETS·Mnesia**(BEAM 내장·무인프라 디스크 영속) · **Postgres** · **Valkey/Redis**. 전부 `keep: {:last, n}` 보존정책 지원.
 - **사람 개입(HITL)** — 노드 앞이나 노드 안에서 멈춰 사람의 답을 받고 그 지점부터 이어간다.
 - **time-travel** — 임의 과거 체크포인트에서 새 thread로 분기. 원본은 보존된다.
-- **에이전트 런타임** — GenServer 에이전트, 시그널 버스, ReAct 프리셋, LLM/MCP 어댑터, 비용 가드.
-- **실시간 관측 UI (ElTrace)** — thread 생애를 브라우저 타임라인으로 보고, 인터럽트에서 승인/거절·여기서 분기를 클릭으로.
+- **에이전트 런타임** — GenServer 에이전트, 시그널 버스, ReAct 프리셋, LLM/MCP 어댑터, 비용 가드, 가드레일/PII, **구조화 출력 재시도**(스키마 검증 실패 시 오류 되먹임).
+- **메모리** — 3-스코프(episodic/semantic/procedural) + 시점진실·**temporal 쿼리**(`fact_at`)·**충돌해소**·시맨틱 회수. 교체형 `Memory.Backend`(네이티브/**Mem0**/**Zep**), Store는 ETS/Valkey/Postgres로 영속.
+- **분산 (BEAM 내장)** — `:pg` 시그널 버스 + **at-least-once 멱등 수신**(Signal id/Dedup, netsplit 재전달 흡수), 멀티노드 `:peer` 검증, libcluster는 호스트 위임.
+- **상호운용 (양방향 MCP)** — ElGraph Action을 **MCP 서버**로 노출(HTTP `/mcp` + stdio, tools/resources/prompts) + **MCP 클라이언트**(Streamable HTTP, sampling/elicitation/roots 양방향). A2A HTTP·AG-UI SSE도 제공.
+- **실시간 관측 UI (ElTrace)** — thread 생애를 브라우저 타임라인으로 보고, 인터럽트에서 승인/거절·여기서 분기를 클릭으로. telemetry 계측(invoke/node/llm.chat span + retry/interrupt/checkpoint/bus/sensor 이벤트) → OTel 브리지 → Langfuse.
 
 > 왜 Elixir인가? LangGraph가 Python에서 *라이브러리로 재구현*한 것들(내구 실행·병렬 격리·
 > 스트리밍 버스·분산 워커)이 BEAM에선 런타임 기본이다. 같은 기능을 더 적은 코드로, 더 강한 보장과 함께.

@@ -30,11 +30,14 @@ user input ─▶ [run graph] ─▶ checkpoint after every step
 ## ✨ Highlights
 
 - **Graph core** — state channels/reducers, conditional edges, parallel fan-out, subgraphs. Only one runtime dependency: `:telemetry`.
-- **Durable execution** — checkpoint → resume. A partially failed parallel step preserves the work that succeeded, avoiding duplicate LLM calls. Swappable backends: **ETS** (in-memory) · **DETS·Mnesia** (BEAM built-in, zero-infra disk persistence) · **Postgres** · **Valkey/Redis** — all support `keep: {:last, n}` retention.
+- **Durable execution** — checkpoint → resume. A partially failed parallel step preserves the work that succeeded, and `Ctx.memo/3` **task memoization** skips re-running LLM/tool calls on resume or retry. Swappable backends: **ETS** (in-memory) · **DETS·Mnesia** (BEAM built-in, zero-infra disk persistence) · **Postgres** · **Valkey/Redis** — all support `keep: {:last, n}` retention.
 - **Human-in-the-loop (HITL)** — pause before or inside a node, take a human's answer, and continue from that exact point.
 - **Time-travel** — fork a new thread from any past checkpoint. The original is preserved.
-- **Agent runtime** — GenServer agents, a signal bus, a ReAct preset, LLM/MCP adapters, cost guards.
-- **Real-time observability UI (ElTrace)** — watch a thread's lifecycle as a browser timeline; approve/reject and "branch here" with a click.
+- **Agent runtime** — GenServer agents, a signal bus, a ReAct preset, LLM/MCP adapters, cost guards, guardrails/PII, and **structured-output retry** (feed validation errors back on failure).
+- **Memory** — 3 scopes (episodic/semantic/procedural) with temporal truth, **point-in-time queries** (`fact_at`), **conflict resolution**, and semantic recall. Swappable `Memory.Backend` (native/**Mem0**/**Zep**); the Store persists to ETS/Valkey/Postgres.
+- **Distribution (BEAM-native)** — `:pg` signal bus with **at-least-once idempotent delivery** (Signal id/Dedup, absorbs netsplit redelivery), multi-node `:peer` verification, libcluster delegated to the host.
+- **Interop (bidirectional MCP)** — expose ElGraph Actions as an **MCP server** (HTTP `/mcp` + stdio; tools/resources/prompts) plus an **MCP client** (Streamable HTTP, bidirectional sampling/elicitation/roots). A2A HTTP and AG-UI SSE are provided too.
+- **Real-time observability UI (ElTrace)** — watch a thread's lifecycle as a browser timeline; approve/reject and "branch here" with a click. Telemetry (invoke/node/llm.chat spans + retry/interrupt/checkpoint/bus/sensor events) → OTel bridge → Langfuse.
 
 > Why Elixir? The things LangGraph had to *reimplement as a library* in Python (durable
 > execution, parallel isolation, streaming bus, distributed workers) are runtime built-ins
