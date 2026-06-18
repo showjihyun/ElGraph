@@ -19,7 +19,11 @@ defmodule ElGraph.MixProject do
           "checkpoints, agents, and bidirectional MCP. No Python.",
       source_url: "https://github.com/showjihyun/ElGraph",
       name: "ElGraph",
-      docs: [main: "readme", extras: ["README.md"], source_ref: "v0.3.0"],
+      docs: [
+        main: "readme",
+        extras: ["README.md": [title: "Overview"], LICENSE: [title: "License"]],
+        source_ref: "v0.3.0"
+      ],
       package: package()
     ]
   end
@@ -65,7 +69,9 @@ defmodule ElGraph.MixProject do
       # executor의 OTel 컨텍스트 전파용 API only — SDK/exporter/브리지는 `el_graph_otel`이 격리한다 (SPEC §13).
       {:opentelemetry_api, "~> 1.4"},
       {:plug, "~> 1.16", only: :test},
-      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+      # hexdocs 발행용(`mix hex.publish`의 docs 단계). 코어를 독립 패키지로 출시할 때 필요.
+      {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
   end
 end
