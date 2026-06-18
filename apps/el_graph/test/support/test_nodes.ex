@@ -12,6 +12,9 @@ defmodule ElGraph.TestNodes do
   def seen_keys(state, _ctx), do: %{seen: state |> Map.keys() |> Enum.sort()}
   def noop(_state, _ctx), do: %{}
   def return_garbage(_state, _ctx), do: :oops
+
+  # 의도적으로 항상 raise하는 테스트 헬퍼 — Dialyzer no_return 경고 억제(test 환경 PLT).
+  @dialyzer {:nowarn_function, boom: 2}
   def boom(_state, _ctx), do: raise("boom")
   def write_pid(_state, _ctx), do: %{x: self()}
 
