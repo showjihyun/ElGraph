@@ -18,6 +18,8 @@ defmodule ElGraph.MixProject do
         "Graph-first agent framework on the BEAM — durable execution, HITL, time-travel, " <>
           "checkpoints, agents, and bidirectional MCP. No Python.",
       source_url: "https://github.com/showjihyun/ElGraph",
+      name: "ElGraph",
+      docs: [main: "readme", extras: ["README.md"], source_ref: "v0.3.0"],
       package: package()
     ]
   end
@@ -27,8 +29,11 @@ defmodule ElGraph.MixProject do
     [
       licenses: ["MIT"],
       maintainers: ["Poor Coin Pepe"],
-      links: %{"GitHub" => "https://github.com/showjihyun/ElGraph"},
-      files: ~w(lib mix.exs)
+      links: %{
+        "GitHub" => "https://github.com/showjihyun/ElGraph",
+        "Changelog" => "https://github.com/showjihyun/ElGraph/blob/main/CHANGELOG.md"
+      },
+      files: ~w(lib mix.exs README.md LICENSE)
     ]
   end
 
