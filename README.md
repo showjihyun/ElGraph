@@ -2,6 +2,8 @@
 
 **한국어** | [English](README.en.md)
 
+[![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2Fshowjihyun%2FElGraph%2Fmain%2Fnotebooks%2Fgetting_started.livemd)
+
 > **BEAM(Elixir/OTP) 위에서 도는 graph-first 에이전트 프레임워크.**
 > Python 의존성 없이 LangGraph의 내구 실행·HITL(사람 개입)·체크포인트를 제공하고,
 > 그 위에 실시간 관측 UI(ElTrace)까지 얹는다.
@@ -239,6 +241,8 @@ ElGraph/                  # 우산 루트 (여기서 mix test / mix format)
 │  └─ el_graph_otel/      # OTel SDK 브리지 — telemetry→OTel/Langfuse
 ├─ examples/
 │  └─ observed_agent/     # el_graph+el_trace를 "의존성으로 끌어다 쓰는" 예제
+├─ notebooks/             # Livebook 예제 (브라우저에서 바로 실행)
+│  └─ getting_started.livemd
 ├─ config/                # 공유 설정 (secrets.exs는 gitignore)
 ├─ docker-compose.yml     # DB 백엔드 테스트용 Postgres/Valkey
 └─ docs/                  # 설계 전문·환경·테스트 규약

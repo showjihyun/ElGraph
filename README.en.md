@@ -2,6 +2,8 @@
 
 [한국어](README.md) | **English**
 
+[![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2Fshowjihyun%2FElGraph%2Fmain%2Fnotebooks%2Fgetting_started.livemd)
+
 > **A graph-first agent framework running on the BEAM (Elixir/OTP).**
 > Delivers LangGraph-style durable execution, human-in-the-loop, and checkpointing
 > with zero Python dependency — and adds a real-time observability UI (ElTrace) on top.
@@ -249,6 +251,8 @@ ElGraph/                  # umbrella root (run mix test / mix format here)
 │  └─ el_graph_otel/      # OTel SDK bridge — telemetry → OTel/Langfuse
 ├─ examples/
 │  └─ observed_agent/     # example of consuming el_graph + el_trace as dependencies
+├─ notebooks/             # Livebook examples (run instantly in the browser)
+│  └─ getting_started.livemd
 ├─ config/                # shared config (secrets.exs is gitignored)
 ├─ docker-compose.yml     # Postgres/Valkey for DB-backend tests
 └─ docs/                  # full design spec, environment, testing conventions
