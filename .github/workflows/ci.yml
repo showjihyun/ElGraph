@@ -11,8 +11,9 @@ permissions:
 
 env:
   MIX_ENV: test
-  ELIXIR_VERSION: "1.18.3"
-  OTP_VERSION: "27.3"
+  # 개발/검증 환경(ENVIRONMENT.md)과 일치 — 포맷터·Dialyzer 버전차로 인한 CI 마찰 제거.
+  ELIXIR_VERSION: "1.20.1"
+  OTP_VERSION: "28"
 
 jobs:
   # 컴파일 + 포맷 + 기본 테스트(인프라/키 없는 :integration 두 파일 포함).
@@ -91,7 +92,7 @@ jobs:
       - name: Run Dialyzer per app
         run: |
           set -e
-          for app in el_graph el_graph_otel el_graph_web el_trace el_graph_ecto el_graph_redis; do
+          for app in el_graph el_graph_req_llm el_graph_otel el_graph_web el_trace el_graph_ecto el_graph_redis; do
             echo "::group::dialyzer $app"
             (cd "apps/$app" && mix dialyzer)
             echo "::endgroup::"

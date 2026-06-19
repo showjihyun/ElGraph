@@ -245,6 +245,7 @@ ElGraph/                  # 우산 루트 (여기서 mix test / mix format)
 │  ├─ el_trace/           # 관측 UI — Phoenix/LiveView (el_graph에 의존)
 │  ├─ el_graph_ecto/      # 내구 체크포인터 — Postgres (Ecto)
 │  ├─ el_graph_redis/     # 내구 체크포인터 — Valkey/Redis (Redix)
+│  ├─ el_graph_req_llm/   # LLM 어댑터 — ReqLLM 경유 ~21 프로바이더
 │  └─ el_graph_otel/      # OTel SDK 브리지 — telemetry→OTel/Langfuse
 ├─ examples/
 │  └─ observed_agent/     # el_graph+el_trace를 "의존성으로 끌어다 쓰는" 예제
@@ -290,7 +291,9 @@ graph = ElGraph.Presets.react(llm, [MyApp.SearchAction], budget: [tokens: 100_00
 ```
 
 LLM이 툴을 호출하면 자동 실행 → 결과를 다시 모델에 넣는 루프가 돈다. 어댑터:
-`ElGraph.LLM.OpenAI` / `.Anthropic` / `.Gemini`, 테스트용 `ElGraph.Test.ScriptedLLM`.
+`ElGraph.LLM.OpenAI` / `.Anthropic` / `.Gemini`
+(+ `.ReqLLM` — [ReqLLM](https://hex.pm/packages/req_llm) 경유 ~21 프로바이더·1000+ 모델, `el_graph_req_llm` 앱),
+테스트용 `ElGraph.Test.ScriptedLLM`.
 
 ### 내구 실행 + 사람 승인(HITL)
 
