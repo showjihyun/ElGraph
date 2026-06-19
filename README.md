@@ -1,108 +1,116 @@
 # ElGraph
 
-**한국어** | [English](README.en.md)
+[한국어](README.ko.md) | **English**
 
 [![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2Fshowjihyun%2FElGraph%2Fmain%2Fnotebooks%2Fgetting_started.livemd)
 
-> **BEAM(Elixir/OTP) 위에서 도는 graph-first 에이전트 프레임워크.**
-> Python 의존성 없이 LangGraph의 내구 실행·HITL(사람 개입)·체크포인트를 제공하고,
-> 그 위에 실시간 관측 UI(ElTrace)까지 얹는다.
+> **A graph-first agent framework running on the BEAM (Elixir/OTP).**
+> Delivers LangGraph-style durable execution, human-in-the-loop, and checkpointing
+> with zero Python dependency — and adds a real-time observability UI (ElTrace) on top.
 
-![ElTrace — 실시간 관측·HITL·time-travel](docs/assets/eltrace-demo.gif)
+![ElGraph — graph, human-in-the-loop, time-travel](docs/assets/elgraph-demo.gif)
 
-*🎬 **ElTrace** — 에이전트 실행을 브라우저에서 실시간으로 보고, 인터럽트에서 **승인/거절**(HITL)하고,
-과거 시점에서 **"여기서 분기"**(time-travel)한다. 직접 보기: `cd apps/el_trace && mix phx.server` → http://localhost:4000*
+*▶ A refund-approval agent: a graph runs, **pauses for human approval** (HITL), resumes with the
+decision, then **time-travels** — forks the paused checkpoint to try the other decision, the
+original run preserved. No API key: `mix run apps/el_graph/scripts/demo_refund_agent.exs`*
 
-LLM 에이전트를 **상태 채널 + 노드 + 엣지**로 선언하면, ElGraph가 체크포인트 기반으로
-실행한다. 중간에 멈춰 사람의 승인을 받고(HITL), crash가 나도 마지막 지점부터 재개하며,
-과거의 임의 시점으로 되감아 "다르게 가봤다면?"을 안전하게 탐색할 수 있다.
+![ElTrace — real-time observability, HITL, time-travel](docs/assets/eltrace-demo.gif)
+
+*🎬 **ElTrace** — watch agent runs live, **approve/reject** at interrupts (HITL), and **"branch here"**
+from any past step (time-travel). See it yourself: `cd apps/el_trace && mix phx.server` → http://localhost:4000*
+
+Declare an LLM agent as **state channels + nodes + edges**, and ElGraph runs it on
+checkpoints. It can pause for human approval (HITL), resume from the last point after a
+crash, and rewind to any past step to safely explore "what if I'd gone differently?".
 
 ```
-사용자 입력 ─▶ [graph 실행] ─▶ 체크포인트마다 저장
+user input ─▶ [run graph] ─▶ checkpoint after every step
                   │
-                  ├─ 인터럽트 → 사람이 승인/거절 → 재개
-                  └─ 과거 step에서 분기(fork) → if 시나리오 탐색
+                  ├─ interrupt → human approves/rejects → resume
+                  └─ fork from a past step → explore "what-if" scenarios
 ```
 
 ---
 
-## 🤔 왜 ElGraph? (3줄 요약)
+## 🤔 Why ElGraph? (3-line summary)
 
-1. **LLM 에이전트를 그래프로 선언** → ElGraph가 체크포인트 기반으로 실행한다.
-2. **멈추고(HITL)·되감고(time-travel)·죽어도 재개**한다 — 내구 실행이 기본값.
-3. **Python·외부 인프라 없이** BEAM 런타임이 동시성·장애복구·실시간을 공짜로 준다 (코어 런타임 의존성은 `:telemetry` 하나).
+1. **Declare your LLM agent as a graph** → ElGraph runs it on top of checkpoints.
+2. **Pause (HITL), rewind (time-travel), resume after a crash** — durable execution is the default.
+3. **No Python, no external infra** — the BEAM runtime gives you concurrency, fault recovery, and real-time for free (the only core runtime dependency is `:telemetry`).
 
-> 한 줄: *LangGraph가 Python에서 라이브러리로 힘겹게 재구현한 것이, BEAM에선 런타임 기본이다.*
+> One line: *what LangGraph had to laboriously reimplement as a library in Python is a runtime built-in on the BEAM.*
 
-## ✨ 핵심 특징
+## ✨ Highlights
 
-- **그래프 코어** — 상태 채널/reducer, 조건부 엣지, 병렬 fan-out, 서브그래프. 런타임 의존성은 `:telemetry` 하나.
-- **내구 실행** — 체크포인트 저장 → 재개. 부분 실패한 병렬 단계도 성공한 작업을 보존하고, `Ctx.memo/3` **task 메모이제이션**으로 재개·재시도 시 LLM/툴 호출을 재실행하지 않는다. 백엔드 교체 가능: **ETS**(인메모리) · **DETS·Mnesia**(BEAM 내장·무인프라 디스크 영속) · **Postgres** · **Valkey/Redis**. 전부 `keep: {:last, n}` 보존정책 지원.
-- **사람 개입(HITL)** — 노드 앞이나 노드 안에서 멈춰 사람의 답을 받고 그 지점부터 이어간다.
-- **time-travel** — 임의 과거 체크포인트에서 새 thread로 분기. 원본은 보존된다.
-- **에이전트 런타임** — GenServer 에이전트, 시그널 버스, ReAct 프리셋, LLM/MCP 어댑터, 비용 가드, 가드레일/PII, **구조화 출력 재시도**(스키마 검증 실패 시 오류 되먹임).
-- **메모리** — 3-스코프(episodic/semantic/procedural) + 시점진실·**temporal 쿼리**(`fact_at`)·**충돌해소**·시맨틱 회수. 교체형 `Memory.Backend`(네이티브/**Mem0**/**Zep**), Store는 ETS/Valkey/Postgres로 영속.
-- **분산 (BEAM 내장)** — `:pg` 시그널 버스 + **at-least-once 멱등 수신**(Signal id/Dedup, netsplit 재전달 흡수), 멀티노드 `:peer` 검증, libcluster는 호스트 위임.
-- **상호운용 (양방향 MCP)** — ElGraph Action을 **MCP 서버**로 노출(HTTP `/mcp` + stdio, tools/resources/prompts) + **MCP 클라이언트**(Streamable HTTP, sampling/elicitation/roots 양방향). A2A HTTP·AG-UI SSE도 제공.
-- **실시간 관측 UI (ElTrace)** — thread 생애를 브라우저 타임라인으로 보고, 인터럽트에서 승인/거절·여기서 분기를 클릭으로. telemetry 계측(invoke/node/llm.chat span + retry/interrupt/checkpoint/bus/sensor 이벤트) → OTel 브리지 → Langfuse.
+- **Graph core** — state channels/reducers, conditional edges, parallel fan-out, subgraphs. Only one runtime dependency: `:telemetry`.
+- **Durable execution** — checkpoint → resume. A partially failed parallel step preserves the work that succeeded, and `Ctx.memo/3` **task memoization** skips re-running LLM/tool calls on resume or retry. Swappable backends: **ETS** (in-memory) · **DETS·Mnesia** (BEAM built-in, zero-infra disk persistence) · **Postgres** · **Valkey/Redis** — all support `keep: {:last, n}` retention.
+- **Human-in-the-loop (HITL)** — pause before or inside a node, take a human's answer, and continue from that exact point.
+- **Time-travel** — fork a new thread from any past checkpoint. The original is preserved.
+- **Agent runtime** — GenServer agents, a signal bus, a ReAct preset, LLM/MCP adapters, cost guards, guardrails/PII, and **structured-output retry** (feed validation errors back on failure).
+- **Memory** — 3 scopes (episodic/semantic/procedural) with temporal truth, **point-in-time queries** (`fact_at`), **conflict resolution**, and semantic recall. Swappable `Memory.Backend` (native/**Mem0**/**Zep**); the Store persists to ETS/Valkey/Postgres.
+- **Distribution (BEAM-native)** — `:pg` signal bus with **at-least-once idempotent delivery** (Signal id/Dedup, absorbs netsplit redelivery), multi-node `:peer` verification, libcluster delegated to the host.
+- **Interop (bidirectional MCP)** — expose ElGraph Actions as an **MCP server** (HTTP `/mcp` + stdio; tools/resources/prompts) plus an **MCP client** (Streamable HTTP, bidirectional sampling/elicitation/roots). A2A HTTP and AG-UI SSE are provided too.
+- **Real-time observability UI (ElTrace)** — watch a thread's lifecycle as a browser timeline; approve/reject and "branch here" with a click. Telemetry (invoke/node/llm.chat spans + retry/interrupt/checkpoint/bus/sensor events) → OTel bridge → Langfuse.
 
-> 왜 Elixir인가? LangGraph가 Python에서 *라이브러리로 재구현*한 것들(내구 실행·병렬 격리·
-> 스트리밍 버스·분산 워커)이 BEAM에선 런타임 기본이다. 같은 기능을 더 적은 코드로, 더 강한 보장과 함께.
-> 상세: [`docs/elixir-vs-python-comparison.md`](docs/elixir-vs-python-comparison.md).
+> Why Elixir? The things LangGraph had to *reimplement as a library* in Python (durable
+> execution, parallel isolation, streaming bus, distributed workers) are runtime built-ins
+> on the BEAM — same capabilities with less code and stronger guarantees.
+> Details: [`docs/elixir-vs-python-comparison.md`](docs/elixir-vs-python-comparison.md).
 
 ---
 
-## 🚀 빠른 시작
+## 🚀 Quick start
 
-### 1. 준비물
+### 1. Prerequisites
 
-- **Elixir 1.18+** / **Erlang/OTP 27+** (개발은 Elixir 1.20 / OTP 28에서 검증)
-- 설치 (택1):
+- **Elixir 1.18+** / **Erlang/OTP 27+** (developed & verified on Elixir 1.20 / OTP 28)
+- Install (pick one):
   - **macOS**: `brew install elixir`
-  - **Linux · macOS (버전 관리)**: [asdf](https://asdf-vm.com) (`asdf plugin add erlang && asdf plugin add elixir`)
-  - **Windows**: `scoop install erlang elixir` — 자세히는 [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md)
+  - **Linux · macOS (version-managed)**: [asdf](https://asdf-vm.com) (`asdf plugin add erlang && asdf plugin add elixir`)
+  - **Windows**: `scoop install erlang elixir` — details in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md)
 
-설치 확인:
+Verify your install:
 
 ```bash
-elixir --version    # Elixir 1.18 이상이면 OK
+elixir --version    # Elixir 1.18 or newer is fine
 ```
 
-### 2. 설치
+### 2. Install
 
-**A) 내 프로젝트에 의존성으로 추가** — `mix.exs`:
+**A) Add it to your project as a dependency** — `mix.exs`:
 
 ```elixir
 def deps do
   [
-    # Hex 출시 전 — git 서브디렉터리에서:
+    # Before the Hex release — from the git subdirectory:
     {:el_graph, github: "showjihyun/ElGraph", sparse: "apps/el_graph"}
-    # Hex 출시 후:
+    # After the Hex release:
     # {:el_graph, "~> 0.3"}
   ]
 end
 ```
 
-> git·Hex 모두 공개라 **설치에 인증이 필요 없다** — `mix hex.user auth`는 패키지를 *올리는 사람*만의 단계다.
+> Both git and Hex are public, so **installing needs no auth** — `mix hex.user auth` is a publisher-only step.
 
-코어 `el_graph`만으로 헤드리스(서버 없는) 에이전트 런타임이 된다. 내구 체크포인터(Postgres/Redis)·
-관측 UI(ElTrace)·A2A/AG-UI HTTP 서버는 형제 앱으로 분리돼 있다(아래 *프로젝트 구조* 참고).
+The core `el_graph` alone is a headless (server-less) agent runtime. The durable checkpointers
+(Postgres/Redis), the observability UI (ElTrace), and the A2A/AG-UI HTTP server are separate
+sibling apps (see *Project structure* below).
 
-**B) ElGraph를 직접 클론해서 보거나 개발** — 이 저장소는 **우산(umbrella) 프로젝트**다:
+**B) Clone ElGraph itself to explore or develop it** — this repo is an **umbrella project**:
 
 ```bash
 git clone https://github.com/showjihyun/ElGraph.git
 cd ElGraph
-mix deps.get        # 의존성 설치
-mix test            # 전체 테스트 (전부 async) — 통과하면 환경 OK
+mix deps.get        # install dependencies
+mix test            # full suite (all async) — green means your env is good
 ```
 
-> Windows에서 `mix`를 못 찾으면 PATH를 잡아준다(자세히는 ENVIRONMENT.md):
+> On Windows, if `mix` isn't found, put it on PATH (see ENVIRONMENT.md):
 > ```powershell
 > $env:Path = "$env:USERPROFILE\scoop\shims;$env:USERPROFILE\scoop\apps\elixir\current\bin;$env:Path"
 > ```
 
-### 3. 첫 그래프 30초 체험
+### 3. Your first graph in 30 seconds
 
 ```bash
 iex -S mix
@@ -121,232 +129,240 @@ ElGraph.invoke(graph, %{n: 10})
 #=> {:ok, %{n: 21}}
 ```
 
-노드는 `(state, ctx)`를 받아 **상태 부분 업데이트 맵**을 돌려준다. 그게 전부다.
+A node takes `(state, ctx)` and returns a **partial state-update map**. That's the whole model.
 
-**키 없이 첫 에이전트** — `ElGraph.Test.ScriptedLLM`이 미리 정한 응답을 돌려주므로, API 키 없이
-ReAct 에이전트 루프를 그대로 돌려볼 수 있다:
+**Your first agent — no API key.** `ElGraph.Test.ScriptedLLM` returns canned responses, so you
+can run the full ReAct agent loop with zero credentials:
 
 ```elixir
 alias ElGraph.{LLM, Presets}
 alias ElGraph.Test.ScriptedLLM
 
-{:ok, pid} = ScriptedLLM.start_link([LLM.assistant("안녕하세요! 무엇을 도와드릴까요?")])
+{:ok, pid} = ScriptedLLM.start_link([LLM.assistant("Hi! How can I help?")])
 graph = Presets.react({ScriptedLLM, pid}, [])
 
-ElGraph.invoke(graph, %{messages: [LLM.user("안녕")]})
-#=> {:ok, %{messages: [%{role: :user, ...}, %{role: :assistant, content: "안녕하세요! ..."}], ...}}
+ElGraph.invoke(graph, %{messages: [LLM.user("hello")]})
+#=> {:ok, %{messages: [%{role: :user, ...}, %{role: :assistant, content: "Hi! How can I help?"}], ...}}
 ```
 
-준비되면 실제 어댑터로 교체한다 — `ElGraph.LLM.OpenAI` / `.Anthropic` / `.Gemini`.
+Swap in a real adapter when you're ready — `ElGraph.LLM.OpenAI` / `.Anthropic` / `.Gemini`.
 
-### 4. 관측 UI 띄우기 (추천 — 가장 직관적)
+### 4. Launch the observability UI (recommended — most intuitive)
 
 ```bash
 cd apps/el_trace
 mix phx.server
 ```
 
-브라우저에서 **http://localhost:4000** 을 열면, 승인 대기 중인 예제 thread가 보인다.
-타임라인을 실시간으로 따라가며 **승인/거절**하거나, 특정 step에서 **여기서 분기**해
-"거절했다면?" 시나리오를 새 thread로 만들어 볼 수 있다.
+Open **http://localhost:4000** and you'll see an example thread waiting for approval.
+Follow the timeline in real time and **approve/reject** it, or **branch here** at a specific
+step to spin up a "what if I'd rejected?" scenario as a new thread.
 
-![ElTrace 타임라인 — 인터럽트에서 승인/거절·여기서 분기](docs/assets/eltrace-hero.png)
+![ElTrace timeline — approve/reject and branch-here at an interrupt](docs/assets/eltrace-hero.png)
 
-> 브라우저 LiveView를 처음 띄울 땐 자바스크립트 자산을 한 번 빌드한다:
-> `mix esbuild el_trace` (또는 `mix phx.server`가 dev에서 자동 처리).
+> The first browser run builds the JavaScript assets once:
+> `mix esbuild el_trace` (or `mix phx.server` handles it automatically in dev).
 
 ---
 
 ## ⚖️ LangChain · LangGraph vs ElGraph
 
-> 한 줄 요약: **LangGraph가 Python에서 "라이브러리로 재구현"해야 했던 것들이 BEAM에선 런타임 기본이다.**
-> 그래서 같은 기능을 *더 적은 코드·더 적은 인프라·더 강한 보장*으로 제공한다.
+> In one line: **what LangGraph had to "reimplement as a library" in Python is a runtime
+> built-in on the BEAM.** So you get the same capabilities with *less code, less
+> infrastructure, and stronger guarantees*.
 
-### 한눈에 — LangChain · LangGraph · ElGraph
+### At a glance — LangChain · LangGraph · ElGraph
 
-> **계층이 다르다**: **LangChain**은 프롬프트·툴·RAG를 잇는 *조립 라이브러리*, **LangGraph**는 그 위에서 상태·내구 실행을 다루는 *그래프 상태머신* 계층(그래서 별도로 분리돼 나왔다). **ElGraph의 직접 비교 대상은 LangGraph**이고, BEAM 위라 LangGraph가 외부에 의존하던 것(실시간 UI·분산·자기치유)까지 런타임에 흡수한다.
+> **They live at different layers**: **LangChain** is an *assembly library* that wires prompts, tools, and RAG; **LangGraph** is the *graph state-machine* layer on top that handles state and durable execution (which is why it was split out). **ElGraph's direct counterpart is LangGraph** — and because it runs on the BEAM, it folds in what LangGraph leans on external systems for (real-time UI, distribution, self-healing).
 
 | | **LangChain** | **LangGraph** | **ElGraph** |
 |---|---|---|---|
-| 한마디 | LLM "조립" 라이브러리 | Python 그래프 상태머신 | **BEAM** 그래프 상태머신 |
-| 핵심 역할 | 프롬프트·툴·RAG 체인 | 내구 실행·HITL·체크포인트 | 〃 **+ 실시간 관측·분산** |
-| 실행 모델 | 체인/DAG (얕은 상태) | 그래프 + 채널/reducer | 그래프 + 채널/reducer |
-| 런타임 | Python (asyncio/GIL) | Python (asyncio/GIL) | BEAM (경량프로세스·선점·분산 내장) |
-| 내구 실행·재개 | ✖ (범위 밖) | ✔ 라이브러리로 재구현 | ✔ **런타임과 한 몸** |
-| HITL · time-travel | ✖ | ✔ HITL / 되감기 일부 | ✔ HITL **+ 과거 시점 분기(fork)** |
-| 장애 격리·자기치유 | 앱코드 + 외부 인프라 | 앱코드 + 외부 인프라 | **Supervisor·프로세스 격리(언어 표준)** |
-| 동시성 | GIL 제약 | GIL 제약 | **전 코어·격리된 경량 프로세스** |
-| 의존성·배포 | 전이 의존성 다수 | 전이 의존성 다수 | 코어 의존성 **사실상 0**(`:telemetry`만)·단일 릴리스 |
-| 실시간 UI | 별도 구성 | 별도 구성 | **LiveView 동일 모델**(ElTrace·인프라 0) |
+| In a word | LLM "assembly" library | Python graph state-machine | **BEAM** graph state-machine |
+| Core role | prompt·tool·RAG chains | durable exec·HITL·checkpoints | 〃 **+ real-time observability·distribution** |
+| Execution model | chain/DAG (shallow state) | graph + channels/reducers | graph + channels/reducers |
+| Runtime | Python (asyncio/GIL) | Python (asyncio/GIL) | BEAM (lightweight processes·preemption·built-in distribution) |
+| Durable exec·resume | ✖ (out of scope) | ✔ reimplemented as a library | ✔ **one with the runtime** |
+| HITL · time-travel | ✖ | ✔ HITL / partial rewind | ✔ HITL **+ fork from a past point** |
+| Fault isolation·self-healing | app code + external infra | app code + external infra | **Supervisor·process isolation (language standard)** |
+| Concurrency | GIL-bound | GIL-bound | **all cores·isolated lightweight processes** |
+| Dependencies·deploy | many transitive deps | many transitive deps | **effectively zero** core deps (`:telemetry` only)·single release |
+| Real-time UI | bolt-on | bolt-on | **same LiveView model** (ElTrace·zero infra) |
 
-에이전트 오케스트레이터는 결국 **"수많은 동시 I/O 대기 + 상태 관리 + 장애 복구"** 문제다.
-이건 BEAM(Erlang/Elixir 런타임)이 30년간 통신 교환기에서 풀어온 바로 그 문제다.
+An agent orchestrator is ultimately a problem of **"many concurrent I/O waits + state
+management + failure recovery."** That is exactly the problem the BEAM (the Erlang/Elixir
+runtime) has been solving in telecom switches for 30 years.
 
-| 평가 항목 | LangGraph (Python) | **ElGraph (Elixir/BEAM)** | ElGraph 이점 |
+| Dimension | LangGraph (Python) | **ElGraph (Elixir/BEAM)** | ElGraph advantage |
 |---|---|---|---|
-| **동시 실행** | asyncio 이벤트 루프 / GIL로 CPU 단일코어 | 경량 프로세스 수백만 개, 전 코어 자동 활용 | ◐ 격리·상태 보존엔 강함; 순수 I/O 바운드 fan-out은 asyncio도 충분 |
-| **API 모양** | `invoke`/`ainvoke` 이중 API (colored functions) | 선점형 스케줄링 → **단일 API** | ✅ "동기/비동기 함수 색깔" 문제 자체가 없음 |
-| **장애 격리** | 모든 경계에 `try/except`, 놓치면 전체 전파 | 프로세스 격리 + Supervisor 트리 (crash-only) | ✅ 한 에이전트의 죽음이 다른 에이전트를 못 죽임 |
-| **자기 치유** | K8s 재시작·Celery 재시도 등 **외부 인프라** 필요 | 슈퍼바이저 재시작 + 체크포인트 복구가 **언어 표준** | ✅ 장수명 에이전트의 복구가 프레임워크 안에서 성립 |
-| **내구 실행/체크포인트** | 라이브러리로 재구현 | 런타임 + 체크포인트가 한 몸 | ✅ 부분 실패한 병렬 단계도 성공분 보존 → LLM 중복 호출 차단 |
-| **상태 안전성** | 가변 dict ("복사해서 쓰라"고 문서가 경고) | 모든 데이터 불변 | ✅ 병렬 브랜치 데이터 레이스가 **언어적으로 불가능** |
-| **실시간 UI** | FastAPI + SSE/WebSocket 별도 구성 | Phoenix LiveView와 메시지 모델 동일 | ✅ 에이전트 이벤트 → 브라우저가 **추가 인프라 0** (← ElTrace가 그 증거) |
-| **분산/스케일아웃** | Redis/RabbitMQ/Kafka + Celery 필수 | distributed Erlang + `:pg` 내장 | ✅ 노드 경계를 넘는 핸드오프도 코드 거의 동일 |
-| **배포·공급망** | 전이 의존성 수십 개, 이미지 수백 MB | 코어 **외부 의존성 0**, `mix release` 단일 바이너리 | ✅ 공급망 표면적·이미지 크기 대폭 감소 |
+| **Concurrency** | asyncio event loop / GIL pins CPU to one core | millions of lightweight processes, all cores used automatically | ◐ strong for isolation/statefulness; pure I/O-bound fan-out is fine on asyncio too |
+| **API shape** | dual `invoke`/`ainvoke` API (colored functions) | preemptive scheduling → **a single API** | ✅ the "sync/async function color" problem simply doesn't exist |
+| **Fault isolation** | `try/except` at every boundary; a miss propagates everywhere | process isolation + supervisor trees (crash-only) | ✅ one agent's death can't take down the others |
+| **Self-healing** | needs **external infra** (K8s restarts, Celery retries) | supervisor restarts + checkpoint recovery are **language standard** | ✅ long-lived agent recovery lives inside the framework |
+| **Durable exec / checkpoints** | reimplemented as a library | runtime and checkpoints are one piece | ✅ partially failed parallel steps keep successes → no duplicate LLM calls |
+| **State safety** | mutable dicts (docs warn you to "copy before use") | everything immutable | ✅ parallel-branch data races are **impossible by language** |
+| **Real-time UI** | FastAPI + SSE/WebSocket wired up separately | same message model as Phoenix LiveView | ✅ agent events → browser with **zero extra infra** (ElTrace is the proof) |
+| **Distribution / scale-out** | requires Redis/RabbitMQ/Kafka + Celery | distributed Erlang + `:pg` built in | ✅ handoffs across node boundaries are nearly identical code |
+| **Deploy / supply chain** | dozens of transitive deps, hundreds of MB images | core has **zero external deps**, `mix release` single binary | ✅ drastically smaller supply-chain surface and image size |
 
-### 정직하게 — LangGraph가 더 나은 곳
+### Honestly — where LangGraph is better
 
-ML/모델 인접 작업은 Python이 우위다: 프로바이더 SDK·토크나이저·평가 도구·로컬 모델(PyTorch)이
-Python 우선이고, 커뮤니티·튜토리얼·인력 풀도 압도적이다. ElGraph는 이를 **HTTP API + MCP로 우회**한다
-— 오케스트레이터가 모델을 직접 실행할 일은 없으므로 이 우회는 구조적으로 타당하다.
-(임베딩/토크나이저는 API의 `usage` 응답이나 MCP 툴로 흡수.)
+ML/model-adjacent work favors Python: provider SDKs, tokenizers, eval tooling, and local
+models (PyTorch) ship Python-first, and the community/tutorials/talent pool are far larger.
+ElGraph **routes around this via HTTP APIs + MCP** — an orchestrator never needs to run the
+model itself, so the workaround is structurally sound. (Embeddings/tokenization are absorbed
+through the API's `usage` response or MCP tools.)
 
-**"Python 두뇌, Elixir 신경계."** 2026년 실전 패턴은 둘 중 하나를 고르는 게 아니라 역할 분담이다 —
-모델(추론·임베딩·파인튜닝)은 Python/호스티드 API에 두고, ElGraph는 그것을 호출하는 *내구·동시·관측
-가능한 오케스트레이션 층*을 맡는다(MCP·A2A·HTTP로 연결). ElGraph는 ML 스택을 대체하려 하지 않는다.
+**"Python brain, Elixir nervous system."** The pragmatic 2026 pattern isn't either/or — it's a
+division of labor: keep the model (inference, embeddings, fine-tuning) on Python/hosted APIs,
+and let ElGraph be the *durable, concurrent, observable orchestration layer* that calls them
+(over MCP, A2A, HTTP). ElGraph does not try to replace the ML stack.
 
-**BEAM 동시성도 솔직하게.** 위 표들은 BEAM이 *할 수 있는 것*(수만 동시·전 코어)을 보여준다 — 다만 그게
-*언제 실익인지*는 구분하는 게 정직하다. 단순 요청→LLM→응답처럼 *네트워크 대기(I/O 바운드)*가 전부인
-워크로드에선 BEAM의 이점이 크지 않다: Python asyncio도 수천 동시 호출을 충분히 처리하고, 실제 병목은
-보통 모델/GPU 용량이지 오케스트레이터 런타임이 아니다. BEAM이 *결정적으로* 앞서는 지점은 따로 있다 —
-**장애 격리**(한 대화가 죽어도 나머지 수천이 계속), **선점 스케줄링**(폭주 노드가 다른 에이전트를 굶기지
-않음), **상태 보존 장수명 세션**(Phoenix가 서버당 10만+ 동시 연결을 버티는 그 모델), **내구 실행·분산**.
-즉 "더 많은 동시 호출"이 아니라 **격리·내구·상태 보존**이 진짜 우위다.
+**On BEAM concurrency, honestly.** The tables above show what the BEAM *can* do (tens of
+thousands concurrent, all cores) — but it's fair to say *when* that pays off. For workloads
+that are pure network-wait (a simple request→LLM→response), the BEAM edge is small: Python
+asyncio handles thousands of concurrent calls just fine, and the real bottleneck is usually
+model/GPU capacity, not the orchestrator runtime. Where the BEAM *decisively* wins is
+elsewhere — **fault isolation** (one conversation crashing while thousands continue),
+**preemptive scheduling** (a runaway node can't starve the others), **stateful long-lived
+sessions** (the same model that lets Phoenix hold 100k+ concurrent connections per server),
+and **durable execution + distribution**. The real advantage is **isolation, durability, and
+statefulness** — not "more concurrent calls."
 
-### 그래서, 언제 ElGraph인가
+### So, when should you pick ElGraph?
 
-- ✅ **동시 1만+ 에이전트 / 장수명("항상 살아있는") 에이전트 / 자기 치유**가 필요할 때
-- ✅ **실시간 관측·사람 개입(HITL) UI**가 제품의 일부일 때 (ElTrace로 인프라 추가 없이)
-- ✅ **적은 인프라로 분산**까지 가야 할 때 (브로커·워커풀 운영 부담 없이)
-- ✅ **공급망/이미지 최소화**가 중요한 운영 환경
+- ✅ When you need **10k+ concurrent agents / long-lived ("always alive") agents / self-healing**
+- ✅ When **real-time observability & human-in-the-loop UI** is part of the product (ElTrace, no extra infra)
+- ✅ When you need to reach **distribution with minimal infra** (no broker/worker-pool ops)
+- ✅ When **minimizing supply chain / image size** matters in production
 
-반대로 빠른 ML 실험·로컬 모델 직접 구동·Python 생태계 밀착이 핵심이면 LangGraph가 편하다.
+Conversely, if fast ML experimentation, running local models directly, or staying close to
+the Python ecosystem is your core need, LangGraph is the more comfortable choice.
 
-> 전체 항목별 상세 비교(동시성·정확성·장애복구·스트리밍·분산·배포)는
-> [`docs/elixir-vs-python-comparison.md`](docs/elixir-vs-python-comparison.md).
+> Full dimension-by-dimension comparison (concurrency, correctness, fault recovery,
+> streaming, distribution, deployment): [`docs/elixir-vs-python-comparison.md`](docs/elixir-vs-python-comparison.md).
 
-### Elixir 생태계에서 — 어디에 서는가
+### Where it sits in the Elixir ecosystem
 
-같은 BEAM 위에도 좋은 에이전트 도구가 있다. ElGraph의 자리는 *그래프 실행기*다:
+There are good agent tools on the BEAM too. ElGraph's seat is the *graph executor*:
 
-- **Jido** (성숙·~1.7k★) — 불변 함수형 에이전트 + 시그널/FSM. persistence·checkpoints·HITL도 있지만 *전체 에이전트 스냅샷*(hibernate/thaw)이지 노드 단위 버전 체크포인트·pending writes가 아니고, 조건/순환 그래프 실행기는 아니다.
-- **sagents** (brainlid/langchain 기반) — HITL 승인이 강점이나 실행이 *고정 선형 파이프라인*이고 체크포인트는 종료시점 저장이다(중간 step 재개 아님).
-- **Oban Pro Workflows** — 진짜 내구 동적 fan-out/fan-in. 단 *유료·비순환(DAG)*이고 그래프-상태 체크포인트·HITL이 없다.
+- **Jido** (mature, ~1.7k★) — immutable functional agents + signals/FSM. It has persistence, checkpoints, and HITL too, but as *whole-agent snapshots* (hibernate/thaw), not per-step versioned checkpoints with pending writes, and it isn't a conditional/cyclic graph executor.
+- **sagents** (built on brainlid/langchain) — strong HITL approvals, but execution is a *fixed linear pipeline* and checkpoints are terminal-point save/restore (no mid-graph resume).
+- **Oban Pro Workflows** — genuine durable dynamic fan-out/fan-in, but *paid, acyclic (DAG)*, with no graph-state checkpoints or HITL.
 
-ElGraph만의 조합: **노드 단위 버전 체크포인트 + pending writes + 인터럽트 HITL + 조건/순환 그래프 위 동적 fan-out**을 한 런타임에서, 오픈 코어로. 단일 축이 아니라 *이 묶음*이 차별점이다.
+ElGraph's combination: **per-step versioned checkpoints + pending writes + interrupt HITL + dynamic fan-out over a conditional/cyclic graph**, in one runtime, open-core. The moat is *the bundle*, not any single axis.
 
-## 📦 프로젝트 구조
+## 📦 Project structure
 
 ```
-ElGraph/                  # 우산 루트 (여기서 mix test / mix format)
+ElGraph/                  # umbrella root (run mix test / mix format here)
 ├─ apps/
-│  ├─ el_graph/           # 코어 런타임 — 그래프·체크포인트·에이전트·LLM/MCP (의존성 0)
-│  ├─ el_graph_web/       # A2A(JSON-RPC)·AG-UI(SSE) HTTP 서버 — Plug/Bandit
-│  ├─ el_trace/           # 관측 UI — Phoenix/LiveView (el_graph에 의존)
-│  ├─ el_graph_ecto/      # 내구 체크포인터 — Postgres (Ecto)
-│  ├─ el_graph_redis/     # 내구 체크포인터 — Valkey/Redis (Redix)
-│  ├─ el_graph_req_llm/   # LLM 어댑터 — ReqLLM 경유 ~21 프로바이더
-│  └─ el_graph_otel/      # OTel SDK 브리지 — telemetry→OTel/Langfuse
+│  ├─ el_graph/           # core runtime — graph, checkpoints, agents, LLM/MCP (zero deps)
+│  ├─ el_graph_web/       # A2A (JSON-RPC) · AG-UI (SSE) HTTP server — Plug/Bandit
+│  ├─ el_trace/           # observability UI — Phoenix/LiveView (depends on el_graph)
+│  ├─ el_graph_ecto/      # durable checkpointer — Postgres (Ecto)
+│  ├─ el_graph_redis/     # durable checkpointer — Valkey/Redis (Redix)
+│  ├─ el_graph_req_llm/   # LLM adapter — ~21 providers via ReqLLM
+│  └─ el_graph_otel/      # OTel SDK bridge — telemetry → OTel/Langfuse
 ├─ examples/
-│  └─ observed_agent/     # el_graph+el_trace를 "의존성으로 끌어다 쓰는" 예제
-├─ notebooks/             # Livebook 예제 (브라우저에서 바로 실행)
+│  └─ observed_agent/     # example of consuming el_graph + el_trace as dependencies
+├─ notebooks/             # Livebook examples (run instantly in the browser)
 │  └─ getting_started.livemd
-├─ config/                # 공유 설정 (secrets.exs는 gitignore)
-├─ docker-compose.yml     # DB 백엔드 테스트용 Postgres/Valkey
-└─ docs/                  # 설계 전문·환경·테스트 규약
+├─ config/                # shared config (secrets.exs is gitignored)
+├─ docker-compose.yml     # Postgres/Valkey for DB-backend tests
+└─ docs/                  # full design spec, environment, testing conventions
 ```
 
-내구 체크포인터는 코어의 `ElGraph.Checkpointer` behaviour를 구현한 **교체 가능한 어댑터**다.
-ETS는 인메모리(빠르지만 재시작 시 소실), 나머지는 재시작·노드 교체를 넘어 thread를 재개한다:
+Durable checkpointers are **swappable adapters** implementing the core `ElGraph.Checkpointer`
+behaviour. ETS is in-memory (fast, but lost on restart); the rest resume threads across restarts
+and node replacement:
 
 ```elixir
-# BEAM 내장 — 외부 인프라 0 (코어 el_graph에 포함)
-cp = {ElGraph.Checkpointer.Dets,   ElGraph.Checkpointer.Dets.config(pid)}    # 단일 파일
-cp = {ElGraph.Checkpointer.Mnesia, ElGraph.Checkpointer.Mnesia.config(pid)}  # 분산 가능(disc_copies)
-# 외부 DB (선택적 형제 앱)
+# BEAM built-in — zero external infra (shipped in core el_graph)
+cp = {ElGraph.Checkpointer.Dets,   ElGraph.Checkpointer.Dets.config(pid)}    # single file
+cp = {ElGraph.Checkpointer.Mnesia, ElGraph.Checkpointer.Mnesia.config(pid)}  # distributable (disc_copies)
+# External DBs (optional sibling apps)
 cp = {ElGraph.Checkpointer.Postgres, ElGraph.Checkpointer.Postgres.config(MyApp.Repo)}
 cp = {ElGraph.Checkpointer.Redis,    ElGraph.Checkpointer.Redis.config(:my_redix)}
 
 ElGraph.invoke(graph, input, checkpointer: cp, thread_id: "t1")
 ```
 
-Postgres는 마이그레이션이 필요하다: `mix el_graph.ecto.gen.migration -r MyApp.Repo` → `mix ecto.migrate`.
+Postgres needs a migration: `mix el_graph.ecto.gen.migration -r MyApp.Repo` then `mix ecto.migrate`.
 
-- **`el_graph`** 만 쓰면 헤드리스(서버 없이) 에이전트 런타임이다.
-- **`el_trace`** 는 거기에 실시간 관측/개입 UI를 더한다. 범용 trace(span/토큰)는 Langfuse 같은
-  도구에 위임하고, ElGraph 체크포인트만이 아는 인과(인터럽트·thread 생애·time-travel)에 집중한다.
+- Use **`el_graph`** alone for a headless (server-less) agent runtime.
+- **`el_trace`** adds a real-time observe/intervene UI. General-purpose tracing (spans/tokens)
+  is delegated to tools like Langfuse; ElTrace focuses on the causality only the ElGraph
+  checkpoints know (interrupts, thread lifecycle, time-travel).
 
 ---
 
-## 📖 조금 더 — 5분 투어
+## 📖 A little more — 5-minute tour
 
-### ReAct 에이전트 (한 줄 프리셋)
+### ReAct agent (one-line preset)
 
 ```elixir
 llm = {ElGraph.LLM.OpenAI, api_key: System.fetch_env!("OPENAI_API_KEY")}
 graph = ElGraph.Presets.react(llm, [MyApp.SearchAction], budget: [tokens: 100_000])
 
 {:ok, %{messages: messages}} =
-  ElGraph.invoke(graph, %{messages: [ElGraph.LLM.user("엘릭서 검색해줘")]})
+  ElGraph.invoke(graph, %{messages: [ElGraph.LLM.user("search for elixir")]})
 ```
 
-LLM이 툴을 호출하면 자동 실행 → 결과를 다시 모델에 넣는 루프가 돈다. 어댑터:
-`ElGraph.LLM.OpenAI` / `.Anthropic` / `.Gemini`
-(+ `.ReqLLM` — [ReqLLM](https://hex.pm/packages/req_llm) 경유 ~21 프로바이더·1000+ 모델, `el_graph_req_llm` 앱),
-테스트용 `ElGraph.Test.ScriptedLLM`.
+When the LLM calls a tool, it runs automatically and feeds the result back to the model in a
+loop. Adapters: `ElGraph.LLM.OpenAI` / `.Anthropic` / `.Gemini` (+ `.ReqLLM` — [ReqLLM](https://hex.pm/packages/req_llm) → ~21 providers / 1000+ models, via the `el_graph_req_llm` app), plus `ElGraph.Test.ScriptedLLM` for tests.
 
-### 내구 실행 + 사람 승인(HITL)
+### Durable execution + human approval (HITL)
 
 ```elixir
 cp = {ElGraph.Checkpointer.ETS, ElGraph.Checkpointer.ETS.config(pid)}
 
-# 승인이 필요한 지점에서 멈춘다
+# pause where approval is needed
 {:interrupted, %{node: :approve, payload: payload}} =
   ElGraph.invoke(graph, input, checkpointer: cp, thread_id: "t1")
 
-# 사람의 답을 주입해 재개 — 멈춘 지점부터, 완료된 노드는 재실행하지 않는다
+# inject the human's answer and resume — from the pause point, without re-running finished nodes
 {:ok, final} = ElGraph.resume(graph, checkpointer: cp, thread_id: "t1", resume: "approved")
 ```
 
-### time-travel 분기 (ElTrace)
+### Time-travel fork (ElTrace)
 
 ```elixir
-ElTrace.observe("t1", graph, cp)                 # UI에 등록
-{:ok, fork_id, _} = ElTrace.fork("t1", 1, as: "t1-거절")   # step 1에서 분기
-ElGraph.resume(graph, checkpointer: cp, thread_id: fork_id, resume: "거절")  # 원본은 보존
+ElTrace.observe("t1", graph, cp)                 # register with the UI
+{:ok, fork_id, _} = ElTrace.fork("t1", 1, as: "t1-rejected")   # branch at step 1
+ElGraph.resume(graph, checkpointer: cp, thread_id: fork_id, resume: "rejected")  # original is preserved
 ```
 
-전체 동작 예제는 [`examples/observed_agent`](examples/observed_agent) 참고.
+See the full working example in [`examples/observed_agent`](examples/observed_agent).
 
 ---
 
-## 📚 문서
+## 📚 Docs
 
-| 문서 | 내용 |
+| Doc | Contents |
 |---|---|
-| [`docs/SPEC.md`](docs/SPEC.md) | 설계 전문, 마일스톤, 검토 이력 |
-| [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) | 개발 환경 설정 (Windows/scoop) |
-| [`docs/TDD-SPEC.md`](docs/TDD-SPEC.md) | 테스트 규약 (TDD, 전부 async) |
-| [`docs/elixir-vs-python-comparison.md`](docs/elixir-vs-python-comparison.md) | LangGraph 대비 |
-| [`docs/ecosystem-review.md`](docs/ecosystem-review.md) | 생태계 검토 & 적용 제안 (Elixir/OSS 프레임워크 분석) |
-| [`docs/DOGFOODING.md`](docs/DOGFOODING.md) | 실사용 관찰 로그 |
+| [`docs/SPEC.md`](docs/SPEC.md) | Full design spec, milestones, review history |
+| [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) | Dev environment setup (Windows/scoop) |
+| [`docs/TDD-SPEC.md`](docs/TDD-SPEC.md) | Testing conventions (TDD, all async) |
+| [`docs/elixir-vs-python-comparison.md`](docs/elixir-vs-python-comparison.md) | vs. LangGraph |
+| [`docs/ecosystem-review.md`](docs/ecosystem-review.md) | Ecosystem review & adoption proposals (Elixir/OSS framework analysis, in Korean) |
+| [`docs/DOGFOODING.md`](docs/DOGFOODING.md) | Real-usage observation log |
 
 ---
 
-## 🛠 개발
+## 🛠 Development
 
 ```bash
-mix test                       # 전체 (el_graph + el_trace)
-mix test --only integration    # 실 API 호출 (config/secrets.exs 필요)
-mix format                     # 커밋 전 필수
+mix test                       # full (el_graph + el_trace)
+mix test --only integration    # real API calls (requires config/secrets.exs)
+mix format                     # required before commit
 
-# 단일 앱 테스트는 해당 앱 디렉터리에서
+# run a single app's tests from that app's directory
 cd apps/el_trace && mix test test/el_trace/sessions_test.exs
 ```
 
-규약: TDD(red → green → refactor), 전 테스트 `async: true`. 자세히는 [`docs/TDD-SPEC.md`](docs/TDD-SPEC.md).
+Conventions: TDD (red → green → refactor), all tests `async: true`. Details in [`docs/TDD-SPEC.md`](docs/TDD-SPEC.md).
 
-실 LLM 키가 필요하면 템플릿을 복사해 채운다 (커밋 금지 — gitignore됨):
+If you need real LLM keys, copy the template and fill it in (do not commit — it's gitignored):
 
 ```bash
 cp config/secrets.example.exs config/secrets.exs
@@ -354,11 +370,12 @@ cp config/secrets.example.exs config/secrets.exs
 
 ---
 
-## 상태
+## Status
 
-M1(코어) ~ M5(멀티 에이전트/분산) 코어가 구현·검증됐고, 관측 트랙은 ElTrace LiveView
-(Timeline 시각화·승인/거절·여기서 분기)까지 동작한다. 마일스톤 상세는 [SPEC §8](docs/SPEC.md).
+The M1 (core) through M5 (multi-agent / distribution) cores are implemented and verified, and
+the observability track is working through the ElTrace LiveView (timeline visualization,
+approve/reject, branch-here). Milestone details: [SPEC §8](docs/SPEC.md).
 
-## 라이선스
+## License
 
 [MIT](LICENSE)
