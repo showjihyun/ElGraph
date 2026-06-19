@@ -164,5 +164,5 @@ forked = %{interrupt_cp | thread_id: "t1-rejected"}
 - **내구 백엔드**: ETS 대신 `DETS`/`Mnesia`(BEAM 내장, 인프라 0) 또는 `Postgres`/`Redis`(형제 앱).
 - **실시간 관측 UI**: `el_trace` 앱 — 타임라인 시각화 + 승인/거절·"여기서 분기" 버튼.
 - 전체 설계: [SPEC](https://github.com/showjihyun/ElGraph/blob/main/docs/SPEC.md) ·
-  [README](https://github.com/showjihyun/ElGraph/blob/main/README.md)
+  [README](https://github.com/showjihyun/ElGraph/blob/main/README.ko.md)
 ```

@@ -10,8 +10,8 @@ Python 없음.
 > [ElGraph 우산 프로젝트](https://github.com/showjihyun/ElGraph)의 일부. 실시간 관측 UI(ElTrace),
 > A2A/AG-UI HTTP 서버, Postgres/Redis 체크포인터, OpenTelemetry 브리지는 형제 패키지에 있다.
 >
-> 전체 문서: [한국어](https://github.com/showjihyun/ElGraph/blob/main/README.md) ·
-> [English](https://github.com/showjihyun/ElGraph/blob/main/README.en.md)
+> 전체 문서: [English](https://github.com/showjihyun/ElGraph/blob/main/README.md) ·
+> [한국어](https://github.com/showjihyun/ElGraph/blob/main/README.ko.md)
 
 ## 설치
 
