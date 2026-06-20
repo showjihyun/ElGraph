@@ -24,7 +24,15 @@ defmodule ElGraphWeb.MCP.Router do
 
   @default_server_info %{"name" => "el_graph", "version" => "0.2.0"}
 
-  plug(Plug.Parsers, parsers: [:json], json_decoder: Jason, pass: ["application/json"])
+  # length: 1 MB cap — 멀티 MB 페이로드로 인한 메모리 고갈(OOM)을 막는다.
+  # 초과 시 Plug.Parsers가 413(RequestTooLargeError)으로 거부한다.
+  plug(Plug.Parsers,
+    parsers: [:json],
+    json_decoder: Jason,
+    pass: ["application/json"],
+    length: 1_000_000
+  )
+
   plug(:match)
   plug(:dispatch)
 

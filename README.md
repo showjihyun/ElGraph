@@ -35,7 +35,7 @@ user input ─▶ [run graph] ─▶ checkpoint after every step
 ## 🤔 Why ElGraph? (3-line summary)
 
 1. **Declare your LLM agent as a graph** → ElGraph runs it on top of checkpoints.
-2. **Pause (HITL), rewind (time-travel), resume after a crash** — durable execution is the default.
+2. **Pause (HITL), rewind (time-travel), resume after a crash** — durable execution, opt-in with one line (pass a checkpointer).
 3. **No Python, no external infra** — the BEAM runtime gives you concurrency, fault recovery, and real-time for free (the only core runtime dependency is `:telemetry`).
 
 > One line: *what LangGraph had to laboriously reimplement as a library in Python is a runtime built-in on the BEAM.*
@@ -227,6 +227,10 @@ elsewhere — **fault isolation** (one conversation crashing while thousands con
 sessions** (the same model that lets Phoenix hold 100k+ concurrent connections per server),
 and **durable execution + distribution**. The real advantage is **isolation, durability, and
 statefulness** — not "more concurrent calls."
+
+> 📊 **Don't take our word for it.** Runnable Benchee benchmarks live in
+> [`apps/el_graph/bench/`](apps/el_graph/bench/) — concurrency scaling (100→1k→10k agents),
+> superstep throughput, durability-mode latency, and input-projection. `cd apps/el_graph && mix run bench/concurrency_scaling.exs`.
 
 ### So, when should you pick ElGraph?
 

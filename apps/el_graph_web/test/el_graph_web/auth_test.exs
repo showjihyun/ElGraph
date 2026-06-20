@@ -47,13 +47,20 @@ defmodule ElGraphWeb.AuthTest do
     assert conn.status == 200
   end
 
-  test "api_keys = [] → open (200 without header)" do
+  test "api_keys = [] → 401 (fail-closed, no explicit keys)" do
     conn = call(conn(:get, "/a2a/echo/agent-card"), [])
-    assert conn.status == 200
+    assert conn.status == 401
+    assert %{"error" => "unauthorized"} = Jason.decode!(conn.resp_body)
   end
 
-  test "api_keys = nil → open (200 without header)" do
+  test "api_keys = nil → 401 (fail-closed)" do
     conn = call(conn(:get, "/a2a/echo/agent-card"), nil)
+    assert conn.status == 401
+  end
+
+  test "api_keys = :public → open (200 without header)" do
+    conn = call(conn(:get, "/a2a/echo/agent-card"), :public)
     assert conn.status == 200
+    assert %{"name" => "echo"} = Jason.decode!(conn.resp_body)
   end
 end

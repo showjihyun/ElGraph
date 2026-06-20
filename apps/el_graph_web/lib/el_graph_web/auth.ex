@@ -2,9 +2,13 @@ defmodule ElGraphWeb.Auth do
   @moduledoc """
   API 키 인증 Plug — `conn.assigns[:api_keys]`의 허용 키 목록으로 요청을 검사한다.
 
-  `api_keys`가 `nil`이거나 `[]`이면 인증을 끈다(기존 오픈 동작 유지). 비어 있지 않으면
-  `authorization: "Bearer <key>"` 또는 `x-api-key: <key>` 헤더의 키가 목록에 있어야 통과한다.
-  없거나 틀리면 401 JSON `{"error":"unauthorized"}`로 응답하고 `halt`한다.
+  **Secure by default (fail-closed)**: `api_keys`가 비었거나(`[]`/`nil`) 미설정이면 모든 요청을
+  401로 막는다. 비어 있지 않은 키 목록이면 `authorization: "Bearer <key>"` 또는
+  `x-api-key: <key>` 헤더의 키가 목록에 있어야 통과한다. 없거나 틀리면 401 JSON
+  `{"error":"unauthorized"}`로 응답하고 `halt`한다.
+
+  인증을 **의도적으로** 끄려면(개발/내부망 등) `api_keys: :public`을 명시해야 한다 —
+  키 누락 같은 실수로 엔드포인트가 열리지 않도록 개방은 항상 명시적 opt-in이다.
   """
 
   @behaviour Plug
@@ -19,20 +23,21 @@ defmodule ElGraphWeb.Auth do
   @spec call(Plug.Conn.t(), keyword()) :: Plug.Conn.t()
   def call(conn, _opts) do
     case conn.assigns[:api_keys] do
-      keys when keys in [nil, []] -> conn
-      keys when is_list(keys) -> authenticate(conn, keys)
+      :public -> conn
+      [_ | _] = keys -> authenticate(conn, keys)
+      _ -> unauthorized(conn)
     end
   end
 
   defp authenticate(conn, keys) do
-    if presented_key(conn) in keys do
-      conn
-    else
-      conn
-      |> put_resp_content_type("application/json")
-      |> send_resp(401, Jason.encode_to_iodata!(%{"error" => "unauthorized"}))
-      |> halt()
-    end
+    if presented_key(conn) in keys, do: conn, else: unauthorized(conn)
+  end
+
+  defp unauthorized(conn) do
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(401, Jason.encode_to_iodata!(%{"error" => "unauthorized"}))
+    |> halt()
   end
 
   defp presented_key(conn) do

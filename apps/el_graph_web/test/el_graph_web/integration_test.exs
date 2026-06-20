@@ -15,7 +15,9 @@ defmodule ElGraphWeb.IntegrationTest do
       ElGraphWeb.server_spec(
         agents: TestAgent.registry(),
         port: @port,
-        task_store: ElGraphWeb.TaskStore
+        task_store: ElGraphWeb.TaskStore,
+        # 인증 없는 라우팅 라운드트립을 검증하는 테스트 — fail-closed 기본값을 명시적으로 끈다.
+        api_keys: :public
       )
     )
 

@@ -143,6 +143,35 @@ defmodule ElGraph.InterruptTest do
                ElGraph.resume(graph, checkpointer: checkpointer, thread_id: "t2", resume: "X")
     end
 
+    test "3+ parallel sibling writes are all preserved when one sibling interrupts", %{
+      checkpointer: {mod, config} = checkpointer
+    } do
+      graph =
+        ElGraph.new()
+        |> ElGraph.state(:messages, default: [], reducer: {Reducers, :append, []})
+        |> ElGraph.add_node(:start, {TestNodes, :add_msg, ["s"]})
+        |> ElGraph.add_node(:a, {TestNodes, :add_msg, ["a"]})
+        |> ElGraph.add_node(:b, {TestNodes, :add_msg, ["b"]})
+        |> ElGraph.add_node(:ask, &TestNodes.ask_msg/2)
+        |> ElGraph.add_edge(:start, :a)
+        |> ElGraph.add_edge(:start, :b)
+        |> ElGraph.add_edge(:start, :ask)
+        |> ElGraph.compile(entry: :start)
+
+      assert {:interrupted, %{node: :ask, payload: :ask, step: 1}} =
+               ElGraph.invoke(graph, %{}, checkpointer: checkpointer, thread_id: "t3")
+
+      # 완료된 두 형제(a, b)의 쓰기가 모두 보존된다 — 2-형제를 넘는 부분 실패 보존.
+      assert [{:a, {%{messages: ["a"]}, nil}}, {:b, {%{messages: ["b"]}, nil}}] =
+               mod.get_writes(config, "t3", 1) |> Enum.sort()
+
+      # 재개: a·b는 재실행하지 않고(중복 없음) ask만 주입값으로 실행한다.
+      assert {:ok, %{messages: msgs}} =
+               ElGraph.resume(graph, checkpointer: checkpointer, thread_id: "t3", resume: "X")
+
+      assert ["X", "a", "b", "s"] = Enum.sort(msgs)
+    end
+
     test "dynamic interrupt without a checkpointer is an explicit error" do
       graph = ask_graph(&TestNodes.ask/2)
 

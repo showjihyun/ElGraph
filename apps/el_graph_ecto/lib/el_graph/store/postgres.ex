@@ -11,7 +11,8 @@ defmodule ElGraph.Store.Postgres do
       ElGraph.Memory.set_fact(mem, ["users", "u1"], "plan", "pro")
 
   `namespace`는 `text[]`로 저장하고, `value`는 `:erlang.term_to_binary/1`로 직렬화해 `bytea`로
-  저장한다(atom/tuple/map 등 Elixir 항 손실 없음). 스키마는 `ElGraphEcto.StoreMigration` 참조.
+  저장한다(atom/tuple/map 등 Elixir 항 손실 없음). 역직렬화는 `binary_to_term/2`를 `[:safe]`로
+  호출해 DB 변조 시 새 atom/함수 생성을 막는다. 스키마는 `ElGraphEcto.StoreMigration` 참조.
   """
 
   @behaviour ElGraph.Store
@@ -48,7 +49,7 @@ defmodule ElGraph.Store.Postgres do
            "SELECT value FROM el_graph_store WHERE namespace = $1::text[] AND key = $2",
            [namespace, key]
          ) do
-      %{rows: [[data]]} -> {:ok, :erlang.binary_to_term(data)}
+      %{rows: [[data]]} -> {:ok, :erlang.binary_to_term(data, [:safe])}
       %{rows: []} -> :not_found
     end
   end
@@ -73,6 +74,6 @@ defmodule ElGraph.Store.Postgres do
         [namespace]
       )
 
-    Enum.map(rows, fn [key, data] -> {key, :erlang.binary_to_term(data)} end)
+    Enum.map(rows, fn [key, data] -> {key, :erlang.binary_to_term(data, [:safe])} end)
   end
 end

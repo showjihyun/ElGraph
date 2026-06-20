@@ -63,6 +63,22 @@ defmodule ElGraphWeb.A2A.RouterTest do
     end
   end
 
+  describe "request body size limit (fail-closed)" do
+    test "a body over the 1 MB cap is rejected before reaching the graph" do
+      big =
+        Jason.encode!(%{
+          "role" => "user",
+          "parts" => [%{"text" => String.duplicate("x", 1_000_001)}]
+        })
+
+      assert_raise Plug.Parsers.RequestTooLargeError, fn ->
+        conn(:post, "/echo/message", big)
+        |> put_req_header("content-type", "application/json")
+        |> call()
+      end
+    end
+  end
+
   describe "GET /:name/.well-known/agent-card.json" do
     test "returns the A2A Agent Card as JSON" do
       conn = call(conn(:get, "/echo/.well-known/agent-card.json"))

@@ -5,7 +5,7 @@
 
 상태: v0.9 (설계 검토 R1~R5 반영, M1~M4 완료 · M5 코어 완료) · 2026-06-13
 
-**구현 현황 요약**: 테스트 460개(el_graph 403 + el_graph_web 28 + el_trace 29) + 통합 다수(실 OpenAI 등), 전부 `async: true`. 코어(L1) 런타임
+**구현 현황 요약**: 기본 스위트 629개(el_graph 524 + el_graph_web 52 + el_trace 47 + el_graph_req_llm 6) + DB 어댑터 55개(el_graph_ecto 28 + el_graph_redis 27, Postgres/Valkey 가용 시) + 통합 다수(실 OpenAI 등), 전부 `async: true`. 코어(L1) 런타임
 의존성 `:telemetry` 1개. 실 OpenAI로 도는 문서 Q&A 에이전트, 센서→버스→에이전트 체인,
 2-에이전트 파이프라인이 동작 검증됨. 구현 로드맵·완료 기준은 §8, 실사용 관찰은 `DOGFOODING.md`.
 
@@ -352,7 +352,7 @@ SPEC 본문은 설계 시점 표기를 유지한다. 실제 구현이 본문과 
 
 **관측 연계 검증**: ① **Langfuse 파이프라인** — `test/el_graph/otel/langfuse_pipeline_test.exs`(`:integration`)가 OTel SDK + pid exporter로 telemetry→Bridge→OTel span을 포착해 `invoke_workflow` 아래 병렬 노드 span 중첩을 단언(Langfuse가 OTLP로 받는 바로 그 데이터). ② **ElTrace** — `apps/el_trace/test/el_trace/new_features_integration_test.exs`가 멀티 에이전트 오케스트레이션 실행의 체크포인트 체인을 ElTrace 생애 타임라인으로 관측·분기(time-travel)함을 단언.
 
-**현황 요약(2026-06)**: el_graph 403 + el_graph_web 28 + el_trace 29 = 460 테스트(전부 async) + 통합 다수. 품질 루브릭은 `docs/quality-rubric.md`.
+**현황 요약(2026-06)**: el_graph 524 + el_graph_web 52 + el_trace 47 + el_graph_req_llm 6 = 기본 629 테스트(전부 async), DB 어댑터 55개(ecto 28 + redis 27)는 Postgres/Valkey 가용 시 추가 + 통합 다수. 품질 루브릭은 `docs/quality-rubric.md`.
 
 ## 부록 A — LangGraph 약점 대응표
 

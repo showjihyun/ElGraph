@@ -71,7 +71,9 @@ defmodule ElGraph.MixProject do
       {:plug, "~> 1.16", only: :test},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       # hexdocs 발행용(`mix hex.publish`의 docs 단계). 코어를 독립 패키지로 출시할 때 필요.
-      {:ex_doc, "~> 0.34", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.34", only: :dev, runtime: false},
+      # 벤치마크(`mix run bench/*.exs`) — 동시성 스케일링·superstep 처리량·durability·input projection.
+      {:benchee, "~> 1.3", only: :dev, runtime: false}
     ]
   end
 end

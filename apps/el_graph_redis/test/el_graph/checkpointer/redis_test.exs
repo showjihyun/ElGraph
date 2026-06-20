@@ -24,6 +24,17 @@ defmodule ElGraph.Checkpointer.RedisTest do
     end
   end
 
+  describe "safe deserialization (보안 — :safe)" do
+    test "직접 심은 unsafe 페이로드(미등록 atom)는 :safe로 거부된다", %{config: config} do
+      # 미등록 atom을 담은 ETF 바이트(문자열 보간이라 atom이 생성되지 않는다) — :safe면 거부.
+      name = "elgraph_unknown_atom_#{System.unique_integer([:positive])}"
+      evil = <<131, 119, byte_size(name)::8, name::binary>>
+      {:ok, _} = Redix.command(:el_graph_test_redix, ["SET", "#{config.prefix}:cp:evil:0", evil])
+
+      assert_raise ArgumentError, fn -> Redis.get(config, "evil", 0) end
+    end
+  end
+
   describe "keep policy (SPEC §3.5 보존 정책)" do
     test "keep: {:last, n} prunes older checkpoints and their writes on put", %{config: base} do
       config = %{base | keep: {:last, 2}}

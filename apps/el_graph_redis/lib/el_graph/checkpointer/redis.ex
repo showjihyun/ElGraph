@@ -18,7 +18,8 @@ defmodule ElGraph.Checkpointer.Redis do
     * `<p>:wr:<thread>:<step>`  → `term_to_binary(writes)` (pending writes)
 
   체크포인트는 `:erlang.term_to_binary/1`로 직렬화한다(RESP는 바이너리 안전). 허용되지 않는 항은
-  `put` 전에 `ElGraph.Checkpoint`가 거부한다.
+  `put` 전에 `ElGraph.Checkpoint`가 거부한다. 역직렬화는 `binary_to_term/2`를 `[:safe]`로 호출해
+  Redis/Valkey가 변조되더라도 새 atom/함수 생성(atom 고갈·RCE 표면)을 막는다.
   """
 
   @behaviour ElGraph.Checkpointer
@@ -89,7 +90,7 @@ defmodule ElGraph.Checkpointer.Redis do
   def get_writes(%{conn: conn, prefix: p}, thread_id, step) do
     case Redix.command(conn, ["GET", wr_key(p, thread_id, step)]) do
       {:ok, nil} -> []
-      {:ok, data} -> :erlang.binary_to_term(data)
+      {:ok, data} -> :erlang.binary_to_term(data, [:safe])
     end
   end
 
@@ -108,7 +109,7 @@ defmodule ElGraph.Checkpointer.Redis do
 
         Enum.zip(steps, datas)
         |> Enum.map(fn {step, data} ->
-          %{step: step, version: :erlang.binary_to_term(data).version}
+          %{step: step, version: :erlang.binary_to_term(data, [:safe]).version}
         end)
     end
   end
@@ -116,7 +117,7 @@ defmodule ElGraph.Checkpointer.Redis do
   defp fetch_checkpoint(conn, prefix, thread_id, step) do
     case Redix.command(conn, ["GET", cp_key(prefix, thread_id, step)]) do
       {:ok, nil} -> :not_found
-      {:ok, data} -> {:ok, :erlang.binary_to_term(data)}
+      {:ok, data} -> {:ok, :erlang.binary_to_term(data, [:safe])}
     end
   end
 

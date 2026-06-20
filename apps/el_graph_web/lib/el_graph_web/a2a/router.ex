@@ -21,7 +21,15 @@ defmodule ElGraphWeb.A2A.Router do
   alias ElGraphWeb.Guardrails
   alias ElGraphWeb.SSE
 
-  plug(Plug.Parsers, parsers: [:json], json_decoder: Jason, pass: ["application/json"])
+  # length: 1 MB cap — JSON-RPC/메시지 본문은 텍스트라 충분하고, 멀티 MB 페이로드로 인한
+  # 메모리 고갈(OOM)을 막는다. 초과 시 Plug.Parsers가 413(RequestTooLargeError)으로 거부한다.
+  plug(Plug.Parsers,
+    parsers: [:json],
+    json_decoder: Jason,
+    pass: ["application/json"],
+    length: 1_000_000
+  )
+
   plug(:match)
   plug(:dispatch)
 

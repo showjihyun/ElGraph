@@ -30,6 +30,21 @@ defmodule ElGraph.Store.PostgresTest do
     end
   end
 
+  describe "safe deserialization (보안 — :safe)" do
+    test "직접 심은 unsafe 값(미등록 atom)은 :safe로 거부된다", %{config: config} do
+      name = "elgraph_unknown_atom_#{System.unique_integer([:positive])}"
+      evil = <<131, 119, byte_size(name)::8, name::binary>>
+
+      Ecto.Adapters.SQL.query!(
+        Repo,
+        "INSERT INTO el_graph_store (namespace, key, value) VALUES ($1::text[], $2, $3)",
+        [["evil"], "k", evil]
+      )
+
+      assert_raise ArgumentError, fn -> Postgres.get(config, ["evil"], "k") end
+    end
+  end
+
   describe "ElGraph.Memory persisted to Postgres" do
     test "facts (incl. temporal/conflict) survive a fresh Store handle", %{config: config} do
       mem = ElGraph.Memory.new({Postgres, config})
