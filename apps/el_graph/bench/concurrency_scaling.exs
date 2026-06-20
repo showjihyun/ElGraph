@@ -17,10 +17,16 @@ graph =
   |> ElGraph.add_edge(:double, :inc)
   |> ElGraph.compile(entry: :double)
 
+# Cap concurrency to avoid scheduler oversubscription. Launching all N tasks at once is far
+# slower at high N (bench/concurrency_tuning.exs shows ~6.8x slower at 10k on 12 cores). A bound
+# around cores*4 keeps per-agent cost roughly flat. Override with MAX_CONCURRENCY=...
+max_concurrency =
+  String.to_integer(System.get_env("MAX_CONCURRENCY", "#{System.schedulers_online() * 4}"))
+
 run_agents = fn n ->
   1..n
   |> Task.async_stream(fn i -> {:ok, _} = ElGraph.invoke(graph, %{n: i}) end,
-    max_concurrency: n,
+    max_concurrency: max_concurrency,
     ordered: false,
     timeout: :infinity
   )
