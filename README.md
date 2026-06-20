@@ -167,6 +167,106 @@ step to spin up a "what if I'd rejected?" scenario as a new thread.
 
 ---
 
+## 🧩 Where ElGraph shines
+
+Three places where ElGraph's strengths line up with what the agentic-AI era actually needs —
+durability, human oversight, and fault isolation, not raw throughput.
+
+### 1. Human-approval gates for high-stakes agents — *governance / oversight*
+
+**The need:** agents that take real-world actions (refunds, payments, deploys) must pause for a
+human before irreversible steps — and the wait can span hours, days, and process restarts.
+**ElGraph's edge:** `Ctx.interrupt/2` pauses *and checkpoints*; the OS process can die while it
+waits; `resume` injects the decision without re-running completed work. Fork the rejected branch
+with time-travel.
+
+```elixir
+# Plan → PAUSE for a human (durably) → execute only after approval.
+approve = fn %{action: a, amount: amt}, ctx ->
+  %{decision: Ctx.interrupt(ctx, %{review: a, amount: amt})}
+end
+
+graph =
+  ElGraph.new()
+  |> ElGraph.state(:action) |> ElGraph.state(:amount) |> ElGraph.state(:decision)
+  |> ElGraph.add_node(:plan, &Planner.run/2)       # LLM proposes a high-stakes action
+  |> ElGraph.add_node(:approve, approve)           # ← human gate (checkpointed)
+  |> ElGraph.add_node(:execute, &Executor.run/2)   # runs ONLY after approval
+  |> ElGraph.add_edge(:plan, :approve)
+  |> ElGraph.add_edge(:approve, :execute)
+  |> ElGraph.compile(entry: :plan)
+
+cp = {ElGraph.Checkpointer.Postgres, ElGraph.Checkpointer.Postgres.config(MyApp.Repo)}
+
+{:interrupted, %{payload: review}} = ElGraph.invoke(graph, input, checkpointer: cp, thread_id: id)
+# → show `review` in your UI; hours later, from any node/process:
+{:ok, result} = ElGraph.resume(graph, checkpointer: cp, thread_id: id, resume: "approved")
+```
+
+### 2. Crash-proof long-running agents — *reliability ("Temporal for agents")*
+
+**The need:** deep-research / multi-tool / multi-hour agents hit transient failures (rate limits,
+flaky APIs). On retry you must not re-run expensive LLM calls or lose completed parallel work.
+**ElGraph's edge:** per-step checkpoints + `Ctx.memo/3` (skip re-running LLM/tool calls on
+resume/retry) + partial-failure preservation (a half-failed parallel fan-out keeps the successes)
++ per-node `retry:`.
+
+```elixir
+# Expensive LLM work is memoized — never re-runs on resume/retry, even across a crash.
+research = fn %{topic: t}, ctx ->
+  %{findings: Ctx.memo(ctx, {:research, t}, fn -> deep_research(t) end)}
+end
+
+graph =
+  ElGraph.new()
+  |> ElGraph.state(:topic) |> ElGraph.state(:findings) |> ElGraph.state(:report)
+  |> ElGraph.add_node(:research, research)
+  |> ElGraph.add_node(:source_a, &SourceA.fetch/2)  # parallel siblings: if one fails mid-run,
+  |> ElGraph.add_node(:source_b, &SourceB.fetch/2)  # the other's completed work is preserved
+  |> ElGraph.add_node(:write, &Writer.run/2, retry: [max: 3, backoff: :exponential])
+  |> ElGraph.add_edge(:research, :source_a)
+  |> ElGraph.add_edge(:research, :source_b)
+  |> ElGraph.add_edge(:source_a, :write)
+  |> ElGraph.add_edge(:source_b, :write)
+  |> ElGraph.compile(entry: :research)
+
+# Mnesia = durable, on disk, zero external infra. Crash mid-run → resume continues from the last
+# checkpoint; completed nodes and memoized LLM calls are NOT re-run (no duplicate spend).
+cp = {ElGraph.Checkpointer.Mnesia, ElGraph.Checkpointer.Mnesia.config(pid)}
+ElGraph.invoke(graph, %{topic: "..."}, checkpointer: cp, thread_id: "job-42")
+```
+
+### 3. A fault-isolated agent fleet — *operating at scale*
+
+**The need:** run many long-lived agents at once (per-user assistants, monitoring agents, a support
+fleet) where one runaway or crashing agent must never take down the others — plus multi-agent
+orchestration and live observability.
+**ElGraph's edge:** the BEAM gives each agent its own preemptively-scheduled, **fault-isolated**
+process; orchestration templates (`supervisor` / `group_chat` / `magentic`) coordinate them, and
+ElTrace shows every run live. *(Honest note: for I/O-bound LLM waits the win isn't raw speed — it's
+isolation, durability, and cheap long-lived sessions.)*
+
+```elixir
+# A supervisor agent routes to specialist workers, each its own BEAM process.
+team = ElGraph.Orchestration.supervisor(llm, [researcher, coder, support], max_steps: 16)
+
+# Fan out thousands of independent, long-lived per-user agents. The scheduler uses all cores,
+# and a crash or runaway loop in one run is fully isolated — the others keep going.
+1..10_000
+|> Task.async_stream(
+     fn user ->
+       ElGraph.invoke(team, %{messages: [LLM.user(user.request)]},
+         checkpointer: cp, thread_id: "user-#{user.id}")
+     end,
+     max_concurrency: System.schedulers_online() * 50,
+     ordered: false
+   )
+|> Stream.run()
+# Watch every run live — approve/reject, "branch here" — in the ElTrace UI.
+```
+
+---
+
 ## ⚖️ LangChain · LangGraph vs ElGraph
 
 > In one line: **what LangGraph had to "reimplement as a library" in Python is a runtime
