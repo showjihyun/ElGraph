@@ -1,5 +1,10 @@
 # ElGraph
 
+[![Hex.pm](https://img.shields.io/hexpm/v/el_graph.svg)](https://hex.pm/packages/el_graph)
+[![Hexdocs](https://img.shields.io/badge/hex-docs-lightgreen.svg)](https://hexdocs.pm/el_graph)
+[![CI](https://github.com/showjihyun/ElGraph/actions/workflows/ci.yml/badge.svg)](https://github.com/showjihyun/ElGraph/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/showjihyun/ElGraph/blob/main/LICENSE)
+
 **BEAM(Elixir/OTP) 위에서 도는 graph-first 에이전트 프레임워크.** 내구 실행·HITL(사람 개입)·
 time-travel·체크포인트 — LangGraph가 Python에서 라이브러리로 재구현한 것이, 여기선 런타임 기본이다.
 Python 없음.
@@ -15,17 +20,16 @@ Python 없음.
 
 ## 설치
 
-아직 Hex 미출시 — git 의존성으로 가져온다(공개 저장소라 **설치 인증 불필요**):
-
 ```elixir
 def deps do
   [
-    # 우산 서브앱이라 sparse로 코어만 가져온다:
-    {:el_graph, github: "showjihyun/ElGraph", sparse: "apps/el_graph"}
-    # (향후 Hex 출시 시) {:el_graph, "~> 0.3"}
+    {:el_graph, "~> 0.3"}
   ]
 end
 ```
+
+> 최신 미출시 변경이 필요하면 git 의존성도 가능(공개 저장소라 **설치 인증 불필요**):
+> `{:el_graph, github: "showjihyun/ElGraph", sparse: "apps/el_graph"}` (우산 서브앱이라 `sparse`로 코어만).
 
 ElGraph는 전역 프로세스를 스스로 시작하지 않는다 — 필요한 것(Task.Supervisor, 체크포인터 테이블
 소유 프로세스 등)을 호스트 앱의 슈퍼비전 트리에 마운트한다.

@@ -1,0 +1,171 @@
+# Meet ElGraph — a 5-minute tour
+
+```elixir
+Mix.install([
+  {:el_graph, "~> 0.3"}
+])
+```
+
+## About this notebook
+
+ElGraph is a **graph-first agent framework on the BEAM (Elixir/OTP)**.
+The durable execution, HITL, and checkpointing that LangGraph had to reimplement as a library in
+Python are runtime built-ins here.
+
+In 5 minutes you'll run the four core ideas **with no API key**:
+
+1. Your first graph (state + nodes + edges)
+2. An agent — the ReAct tool loop (no key, via `ScriptedLLM`)
+3. Human-in-the-loop (HITL) — pause, ask, continue
+4. **Time-travel** — safely fork "what if I'd rejected?"
+
+> 💡 Using an anonymous function as a node makes ElGraph warn "MFA recommended for durable graphs" —
+> we keep anonymous functions here for learning. In production durable graphs use `{Mod, :fun, []}` (MFA).
+
+## 1. Your first graph — 30 seconds
+
+Declare a state channel `:n` and chain two nodes: `:double` (×2) → `:inc` (+1). A node takes
+`(state, ctx)` and returns a **partial state-update map**. That's it.
+
+```elixir
+graph =
+  ElGraph.new()
+  |> ElGraph.state(:n, default: 0)
+  |> ElGraph.add_node(:double, fn %{n: n}, _ctx -> %{n: n * 2} end)
+  |> ElGraph.add_node(:inc, fn %{n: n}, _ctx -> %{n: n + 1} end)
+  |> ElGraph.add_edge(:double, :inc)
+  |> ElGraph.compile(entry: :double)
+
+ElGraph.invoke(graph, %{n: 10})
+# => {:ok, %{n: 21}}
+```
+
+## 2. An agent — no API key (ReAct tool loop)
+
+`ScriptedLLM` is a test LLM that replays canned responses. With **zero credentials** you can watch
+an agent run the ReAct loop: (1) call a tool → (2) take the result and answer.
+
+First define a tool (a fake web search) — one schema generates both parameter validation and the
+LLM tool-spec.
+
+```elixir
+defmodule WebSearch do
+  use ElGraph.Action,
+    name: "web_search",
+    description: "Search the web",
+    schema: [query: [type: :string, required: true]]
+
+  @impl true
+  def run(%{query: q}, _ctx), do: {:ok, %{results: ["3 results for #{q}"]}}
+end
+```
+
+Now script the LLM to "call web_search first → take the result and answer".
+
+```elixir
+alias ElGraph.{LLM, Presets}
+alias ElGraph.Test.ScriptedLLM
+
+{:ok, llm} =
+  ScriptedLLM.start_link([
+    LLM.assistant(nil, [LLM.tool_call("c1", "web_search", %{"query" => "elixir agents"})]),
+    LLM.assistant("I searched and found some results about elixir agents!")
+  ])
+
+agent = Presets.react({ScriptedLLM, llm}, [WebSearch])
+
+{:ok, %{messages: messages}} =
+  ElGraph.invoke(agent, %{messages: [LLM.user("search for elixir agents")]})
+
+# user → assistant(tool_call) → tool(result) → assistant(answer)
+Enum.map(messages, fn m -> {m.role, m[:content]} end)
+```
+
+To use a real model, swap `{ScriptedLLM, llm}` for
+`{ElGraph.LLM.OpenAI, api_key: System.fetch_env!("OPENAI_API_KEY")}` — everything else stays the same.
+
+## 3. Human-in-the-loop (HITL) — pause, ask, continue
+
+Calling `Ctx.interrupt/2` inside a node **stops execution right there** and saves a checkpoint.
+When a human supplies an answer, it is injected as the return value of `interrupt` and execution continues.
+
+First start a checkpointer (ETS — BEAM built-in, zero external infra).
+
+```elixir
+{:ok, cp_pid} = ElGraph.Checkpointer.ETS.start_link()
+cp_config = ElGraph.Checkpointer.ETS.config(cp_pid)
+cp = {ElGraph.Checkpointer.ETS, cp_config}
+:ok
+```
+
+The approval node pauses to ask a human.
+
+```elixir
+alias ElGraph.Ctx
+
+approve = fn state, ctx ->
+  decision = Ctx.interrupt(ctx, %{question: "Approve transfer of #{state.amount}?"})
+  %{decision: decision}
+end
+
+hitl =
+  ElGraph.new()
+  |> ElGraph.state(:amount, default: 0)
+  |> ElGraph.state(:decision, default: nil)
+  |> ElGraph.state(:result, default: nil)
+  |> ElGraph.add_node(:approve, approve)
+  |> ElGraph.add_node(:finish, fn s, _ctx -> %{result: "processed as #{s.decision}"} end)
+  |> ElGraph.add_edge(:approve, :finish)
+  |> ElGraph.compile(entry: :approve)
+
+# Run → it stops at :approve
+{:interrupted, info} = ElGraph.invoke(hitl, %{amount: 100}, checkpointer: cp, thread_id: "t1")
+info
+```
+
+While paused, grab the interrupt checkpoint (we'll use it for time-travel in section 4).
+Then inject `"approved"` and continue.
+
+```elixir
+{:ok, interrupt_cp} = ElGraph.Checkpointer.ETS.get(cp_config, "t1", :latest)
+
+{:ok, approved} = ElGraph.resume(hitl, checkpointer: cp, thread_id: "t1", resume: "approved")
+approved.result
+# => "processed as approved"
+```
+
+## 4. Time-travel — safely explore "what if I'd rejected?"
+
+Because ElGraph saves state as checkpoints, you can **rewind to a past branch point and try a
+different decision** — leaving the original timeline intact.
+
+Copying the grabbed interrupt checkpoint to a **new thread** *is* the fork (what `ElTrace.fork`
+does under the hood). From the same branch point, resume with `"rejected"` this time.
+
+```elixir
+# Copy the interrupt checkpoint to a new thread "t1-rejected" = fork
+forked = %{interrupt_cp | thread_id: "t1-rejected"}
+:ok = ElGraph.Checkpointer.ETS.put(cp_config, forked)
+
+# Resume from the same point with a different decision — the original "t1" (approved) is preserved
+{:ok, rejected} = ElGraph.resume(hitl, checkpointer: cp, thread_id: "t1-rejected", resume: "rejected")
+
+%{
+  "t1 (original)" => approved.result,
+  "t1-rejected (fork)" => rejected.result
+}
+# => %{"t1 (original)" => "processed as approved", "t1-rejected (fork)" => "processed as rejected"}
+```
+
+Both timelines **coexist**. You explored "what if I'd rejected?" without losing the approved run.
+Doing this with clicks in the browser is the **ElTrace** real-time UI.
+
+## Next
+
+- **Real LLM**: `{ScriptedLLM, llm}` → `{ElGraph.LLM.OpenAI, api_key: ...}` (or `.Anthropic` / `.Gemini`).
+- **Durable backends**: instead of ETS, use `DETS` / `Mnesia` (BEAM built-in, zero-infra) or
+  `Postgres` / `Redis` (sibling apps).
+- **Real-time observability UI**: the `el_trace` app — timeline visualization + approve/reject and
+  "branch here" buttons.
+- Full design: [SPEC](https://github.com/showjihyun/ElGraph/blob/main/docs/SPEC.md) ·
+  [README](https://github.com/showjihyun/ElGraph/blob/main/README.md)

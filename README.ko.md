@@ -2,6 +2,10 @@
 
 [English](README.md) | **한국어**
 
+[![Hex.pm](https://img.shields.io/hexpm/v/el_graph.svg)](https://hex.pm/packages/el_graph)
+[![Hexdocs](https://img.shields.io/badge/hex-docs-lightgreen.svg)](https://hexdocs.pm/el_graph)
+[![CI](https://github.com/showjihyun/ElGraph/actions/workflows/ci.yml/badge.svg)](https://github.com/showjihyun/ElGraph/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2Fshowjihyun%2FElGraph%2Fmain%2Fnotebooks%2Fgetting_started.livemd)
 
 > **BEAM(Elixir/OTP) 위에서 도는 graph-first 에이전트 프레임워크.**
@@ -81,15 +85,13 @@ elixir --version    # Elixir 1.18 이상이면 OK
 ```elixir
 def deps do
   [
-    # Hex 출시 전 — git 서브디렉터리에서:
-    {:el_graph, github: "showjihyun/ElGraph", sparse: "apps/el_graph"}
-    # Hex 출시 후:
-    # {:el_graph, "~> 0.3"}
+    {:el_graph, "~> 0.3"}
   ]
 end
 ```
 
-> git·Hex 모두 공개라 **설치에 인증이 필요 없다** — `mix hex.user auth`는 패키지를 *올리는 사람*만의 단계다.
+> 최신 미출시 변경이 필요하면 git 서브디렉터리도 가능:
+> `{:el_graph, github: "showjihyun/ElGraph", sparse: "apps/el_graph"}`. git·Hex 모두 공개라 **설치에 인증이 필요 없다**(`mix hex.user auth`는 *올리는 사람*만의 단계).
 
 코어 `el_graph`만으로 헤드리스(서버 없는) 에이전트 런타임이 된다. 내구 체크포인터(Postgres/Redis)·
 관측 UI(ElTrace)·A2A/AG-UI HTTP 서버는 형제 앱으로 분리돼 있다(아래 *프로젝트 구조* 참고).

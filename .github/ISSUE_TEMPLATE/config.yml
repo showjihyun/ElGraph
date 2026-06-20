@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Questions & Discussions
+    url: https://github.com/showjihyun/ElGraph/discussions
+    about: Ask questions, share ideas, and get help.
+  - name: 📚 Documentation (HexDocs)
+    url: https://hexdocs.pm/el_graph
+    about: API reference and module docs.
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/showjihyun/ElGraph/security/advisories/new
+    about: Please report vulnerabilities privately, not as public issues.
