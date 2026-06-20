@@ -4,7 +4,13 @@ defmodule ElGraph.LLM.StreamToCtxTest do
   alias ElGraph.LLM
   alias ElGraph.Test.ScriptedLLM
 
-  defp ctx, do: %ElGraph.Ctx{thread_id: "t", step: 0, node: :n, event_sink: self()}
+  defp ctx,
+    do: %ElGraph.Ctx{
+      thread_id: "t",
+      step: 0,
+      node: :n,
+      private: %ElGraph.Ctx.Internal{event_sink: self()}
+    }
 
   describe "stream_to_ctx/4" do
     test "emits each streamed delta to the ctx event sink and returns the response" do
