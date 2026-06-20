@@ -174,7 +174,8 @@ defmodule ElGraph.Agent.Server do
   # :registry는 에이전트 이름용이므로, 실행 introspection용 Registry는 :run_registry로 받아
   # Runner의 :registry 옵션으로 변환한다.
   defp build_run_opts(opts) do
-    run_opts = Keyword.take(opts, [:checkpointer, :thread_id, :max_steps, :event_sink])
+    run_opts =
+      Keyword.take(opts, [:checkpointer, :thread_id, :max_steps, :event_sink, :max_concurrency])
 
     case Keyword.get(opts, :run_registry) do
       nil -> run_opts

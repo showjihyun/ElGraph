@@ -117,7 +117,9 @@ defmodule ElGraph.Executor do
         interrupted: nil
     }
 
-    with :ok <- mod.put(config, checkpoint), do: {:ok, checkpoint}
+    with :ok <-
+           run_write(fn -> mod.put(config, checkpoint) end, checkpoint.thread_id, checkpoint.step),
+         do: {:ok, checkpoint}
   end
 
   defp build_meta(opts) do
@@ -546,7 +548,7 @@ defmodule ElGraph.Executor do
       task_cache: dump_cache(meta)
     }
 
-    case mod.put(config, checkpoint) do
+    case run_write(fn -> mod.put(config, checkpoint) end, meta.thread_id, step) do
       :ok ->
         {:interrupted,
          %{thread_id: meta.thread_id, step: step, node: node, payload: payload, state: state}}
@@ -588,7 +590,11 @@ defmodule ElGraph.Executor do
       step: step
     })
 
-    mod.put(config, checkpoint(meta, step, state, next))
+    run_write(
+      fn -> mod.put(config, checkpoint(meta, step, state, next)) end,
+      meta.thread_id,
+      step
+    )
   end
 
   defp checkpoint(%{thread_id: thread_id} = meta, step, state, next),
@@ -623,7 +629,7 @@ defmodule ElGraph.Executor do
          step,
          writes
        ),
-       do: mod.put_writes(config, thread_id, step, writes)
+       do: run_write(fn -> mod.put_writes(config, thread_id, step, writes) end, thread_id, step)
 
   ## 비동기 writer (:async) — 순서 보장(FIFO 메일박스), 반환 전 flush, 정상 종료 시 stop.
   # executor 프로세스에 link되어, executor가 죽으면 writer도 죽는다(진행 중 쓰기 유실은 async의 트레이드오프).
@@ -652,11 +658,11 @@ defmodule ElGraph.Executor do
   defp writer_loop({mod, config} = cp) do
     receive do
       {:put, checkpoint} ->
-        guard_write(fn -> mod.put(config, checkpoint) end, checkpoint.thread_id, checkpoint.step)
+        run_write(fn -> mod.put(config, checkpoint) end, checkpoint.thread_id, checkpoint.step)
         writer_loop(cp)
 
       {:put_writes, thread_id, step, writes} ->
-        guard_write(fn -> mod.put_writes(config, thread_id, step, writes) end, thread_id, step)
+        run_write(fn -> mod.put_writes(config, thread_id, step, writes) end, thread_id, step)
         writer_loop(cp)
 
       {:flush, from} ->
@@ -668,29 +674,33 @@ defmodule ElGraph.Executor do
     end
   end
 
-  # :async writer는 호출자에 반환값을 돌려줄 수 없으므로, 쓰기 실패를 조용히 삼키지 않고
-  # telemetry로 노출한다(SPEC §3.5의 async 트레이드오프는 "마지막 step 유실"이지 "무신호"가 아니다).
-  # 반환된 {:error,_}뿐 아니라 raise/exit하는 어댑터(Postgres SQL.query!, Redis `{:ok,_}=...`)도
-  # 격리한다 — 그러지 않으면 spawn_link된 writer가 죽으며 executor(동기 invoke면 호출자)까지
-  # 끌고 죽는다. 실패한 step은 유실되지만 실행 자체는 계속된다.
-  defp guard_write(fun, thread_id, step) do
+  # 모든 체크포인트 쓰기(:sync/:exit/인터럽트는 executor 프로세스에서, :async는 writer에서)는
+  # 이 함수를 통과한다. 반환된 {:error,_}뿐 아니라 raise/exit/throw하는 어댑터(Postgres
+  # SQL.query!, Redis `{:ok,_}=...`)와 비계약 반환을 모두 격리해 `{:error, reason}`으로 정규화하고
+  # telemetry로 노출한다 — 그러지 않으면 raise가 executor(동기 invoke면 호출자)나 spawn_link된
+  # writer를 죽인다. :sync는 호출부(with 체인)에서 이 {:error}로 실행을 실패시키고, :async/:exit는
+  # 반환을 버리지만 telemetry로 관측된다(SPEC §3.5의 async 트레이드오프는 "유실"이지 "무신호/크래시"가 아니다).
+  defp run_write(fun, thread_id, step) do
     case fun.() do
       :ok -> :ok
-      {:error, reason} -> emit_write_error(thread_id, step, reason)
-      _other -> :ok
+      {:error, reason} -> write_error(thread_id, step, reason)
+      other -> write_error(thread_id, step, {:invalid_checkpointer_return, other})
     end
   rescue
-    exception -> emit_write_error(thread_id, step, exception)
+    exception -> write_error(thread_id, step, exception)
   catch
-    :exit, reason -> emit_write_error(thread_id, step, {:exit, reason})
+    :exit, reason -> write_error(thread_id, step, {:exit, reason})
+    :throw, value -> write_error(thread_id, step, {:throw, value})
   end
 
-  defp emit_write_error(thread_id, step, reason) do
+  defp write_error(thread_id, step, reason) do
     :telemetry.execute([:el_graph, :checkpoint, :error], %{}, %{
       thread_id: thread_id,
       step: step,
       reason: reason
     })
+
+    {:error, reason}
   end
 
   ## 쓰기 병합
