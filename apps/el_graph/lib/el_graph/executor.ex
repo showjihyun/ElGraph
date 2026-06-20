@@ -130,6 +130,9 @@ defmodule ElGraph.Executor do
       assigns: Keyword.get(opts, :assigns, %{}),
       checkpointer: Keyword.get(opts, :checkpointer),
       max_steps: Keyword.get(opts, :max_steps, @default_max_steps),
+      # 한 superstep의 병렬 노드 동시 실행 상한. 기본은 코어 수(CPU 바운드에 적합) —
+      # LLM/HTTP 같은 I/O 바운드 fan-out은 더 높게 주는 게 유리하다 (SPEC §3.4).
+      max_concurrency: Keyword.get(opts, :max_concurrency, System.schedulers_online()),
       interrupt_before: Keyword.get(opts, :interrupt_before, []),
       interrupts: %{},
       interrupt_step: nil,
@@ -300,18 +303,21 @@ defmodule ElGraph.Executor do
         {entry, exec_node(graph, entry, state, step, meta)}
       end,
       ordered: true,
+      max_concurrency: meta.max_concurrency,
       timeout: :infinity
     )
     |> Enum.map(fn {:ok, tagged} -> tagged end)
   end
 
-  defp exec_node(%Graph{nodes: nodes} = graph, {_key, node, send_input}, state, step, meta) do
+  defp exec_node(%Graph{nodes: nodes} = graph, {entry_key, node, send_input}, state, step, meta) do
     %{run: run, opts: opts} = Map.fetch!(nodes, node)
 
     ctx = %Ctx{
       thread_id: meta.thread_id,
       step: step,
       node: node,
+      # entry_key는 fan-out 인스턴스를 구분한다 — 일반 노드는 노드 이름, :send는 {target, index}.
+      node_key: entry_key,
       event_sink: meta.event_sink,
       assigns: meta.assigns,
       resume_values: resume_values(meta, node, step),
@@ -635,11 +641,11 @@ defmodule ElGraph.Executor do
   defp writer_loop({mod, config} = cp) do
     receive do
       {:put, checkpoint} ->
-        mod.put(config, checkpoint)
+        report_write(mod.put(config, checkpoint), checkpoint.thread_id, checkpoint.step)
         writer_loop(cp)
 
       {:put_writes, thread_id, step, writes} ->
-        mod.put_writes(config, thread_id, step, writes)
+        report_write(mod.put_writes(config, thread_id, step, writes), thread_id, step)
         writer_loop(cp)
 
       {:flush, from} ->
@@ -649,6 +655,18 @@ defmodule ElGraph.Executor do
       :stop ->
         :ok
     end
+  end
+
+  # :async writer는 호출자에 반환값을 돌려줄 수 없으므로, 쓰기 실패를 조용히 삼키지 않고
+  # telemetry로 노출한다(SPEC §3.5의 async 트레이드오프는 "마지막 step 유실"이지 "무신호"가 아니다).
+  defp report_write(:ok, _thread_id, _step), do: :ok
+
+  defp report_write({:error, reason}, thread_id, step) do
+    :telemetry.execute([:el_graph, :checkpoint, :error], %{}, %{
+      thread_id: thread_id,
+      step: step,
+      reason: reason
+    })
   end
 
   ## 쓰기 병합

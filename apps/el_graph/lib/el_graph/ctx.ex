@@ -14,6 +14,7 @@ defmodule ElGraph.Ctx do
     :step,
     :node,
     :event_sink,
+    node_key: nil,
     resume_values: [],
     interrupt_counter: nil,
     cancel_flag: nil,
@@ -21,10 +22,18 @@ defmodule ElGraph.Ctx do
     task_cache: nil
   ]
 
+  @typedoc """
+  노드 실행 인스턴스의 안정적 식별자. 일반 노드는 노드 이름(atom)과 같지만,
+  `:send` fan-out으로 같은 노드가 한 superstep에 여러 번 등장할 때는 인스턴스마다
+  다르다. 재개(replay) 시에도 동일하게 복원되므로 `memo/3` 캐시의 네임스페이스로 쓰인다.
+  """
+  @type node_key :: atom() | {atom(), non_neg_integer()}
+
   @type t :: %__MODULE__{
           thread_id: String.t(),
           step: non_neg_integer(),
           node: atom(),
+          node_key: node_key() | nil,
           event_sink: pid() | nil,
           resume_values: [term()],
           interrupt_counter: :counters.counters_ref() | nil,
@@ -90,19 +99,24 @@ defmodule ElGraph.Ctx do
   따라서 `fun`의 결과는 직렬화 가능해야 한다(pid/ref/port 금지 — 재개 시 무의미).
   `task_cache`가 없는 컨텍스트(예: 실행기 밖에서 노드 직접 호출)에서는 그냥 `fun`을 실행한다.
 
+  캐시는 `node_key`(노드 실행 인스턴스)로 네임스페이스된다 — `:send` fan-out으로 같은
+  노드가 한 superstep에 여러 번 돌 때도 인스턴스별 memo가 서로 덮어쓰지 않는다.
+
       answer = Ctx.memo(ctx, :classify, fn -> LLM.chat(...) end)
   """
   @spec memo(t(), term(), (-> value)) :: value when value: term()
   def memo(%__MODULE__{task_cache: nil}, _key, fun), do: fun.()
 
-  def memo(%__MODULE__{task_cache: tid, node: node}, key, fun) do
-    case :ets.lookup(tid, {node, key}) do
+  def memo(%__MODULE__{task_cache: tid} = ctx, key, fun) do
+    cache_key = {ctx.node_key || ctx.node, key}
+
+    case :ets.lookup(tid, cache_key) do
       [{_k, value}] ->
         value
 
       [] ->
         value = fun.()
-        :ets.insert(tid, {{node, key}, value})
+        :ets.insert(tid, {cache_key, value})
         value
     end
   end

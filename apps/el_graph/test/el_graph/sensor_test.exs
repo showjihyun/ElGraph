@@ -45,6 +45,20 @@ defmodule ElGraph.SensorTest do
     end
   end
 
+  defmodule PollRaisingSensor do
+    use ElGraph.Sensor
+
+    @impl true
+    def poll(_state), do: raise("poll boom")
+  end
+
+  defmodule DispatchTargetSensor do
+    use ElGraph.Sensor
+
+    @impl true
+    def poll(_state), do: {:signal, %Signal{type: "fires", data: %{}}, nil}
+  end
+
   describe "Sensor (SPEC §5)" do
     test "tick polls synchronously; emits only when poll returns a signal" do
       parent = self()
@@ -117,6 +131,32 @@ defmodule ElGraph.SensorTest do
       # 고정주기: cycle ≈ interval(40ms). 드리프트(버그): cycle ≈ interval + 작업 ≈ 65ms.
       # 둘 사이(55ms)로 가른다.
       assert median < 55
+    end
+  end
+
+  describe "callback isolation (SPEC §5)" do
+    test "a raising poll reports via telemetry and keeps the sensor alive" do
+      ref = :telemetry_test.attach_event_handlers(self(), [[:el_graph, :sensor, :error]])
+      sensor = start_supervised!({PollRaisingSensor, []})
+
+      assert :ok = Sensor.tick(sensor)
+      assert_receive {[:el_graph, :sensor, :error], ^ref, %{}, %{sensor: PollRaisingSensor}}
+
+      # 센서가 살아있어 다시 폴링할 수 있어야 한다 (계속 폴링).
+      assert :ok = Sensor.tick(sensor)
+    end
+
+    test "a raising dispatch reports via telemetry and keeps the sensor alive" do
+      ref = :telemetry_test.attach_event_handlers(self(), [[:el_graph, :sensor, :error]])
+
+      sensor =
+        start_supervised!(
+          {DispatchTargetSensor, on_signal: fn _signal -> raise "dispatch boom" end}
+        )
+
+      assert :ok = Sensor.tick(sensor)
+      assert_receive {[:el_graph, :sensor, :error], ^ref, %{}, %{sensor: DispatchTargetSensor}}
+      assert :ok = Sensor.tick(sensor)
     end
   end
 end
