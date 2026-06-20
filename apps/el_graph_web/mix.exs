@@ -4,7 +4,7 @@ defmodule ElGraphWeb.MixProject do
   def project do
     [
       app: :el_graph_web,
-      version: "0.3.0",
+      version: "0.4.0",
       build_path: "../../_build",
       config_path: "../../config/config.exs",
       deps_path: "../../deps",
@@ -18,6 +18,8 @@ defmodule ElGraphWeb.MixProject do
         "HTTP server exposing ElGraph agents over A2A (JSON-RPC 2.0) and AG-UI (SSE) — " <>
           "a thin Plug/Bandit layer.",
       source_url: "https://github.com/showjihyun/ElGraph",
+      name: "el_graph_web",
+      docs: [main: "readme", extras: ["README.md": [title: "Overview"]], source_ref: "v0.4.0"],
       package: package()
     ]
   end
@@ -55,12 +57,19 @@ defmodule ElGraphWeb.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:el_graph, in_umbrella: true},
+      {:el_graph, el_graph_dep()},
       {:plug, "~> 1.16"},
       {:bandit, "~> 1.5"},
       {:jason, "~> 1.4"},
       {:req, "~> 0.6"},
-      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
+  end
+
+  # Hex는 umbrella/path 의존성을 거부한다. 배포 시(HEX_PUBLISH=1) Hex 버전으로,
+  # 평소 umbrella 개발/테스트에선 로컬 소스(in_umbrella)로 해석한다.
+  defp el_graph_dep do
+    if System.get_env("HEX_PUBLISH"), do: "~> 0.3", else: [in_umbrella: true]
   end
 end
