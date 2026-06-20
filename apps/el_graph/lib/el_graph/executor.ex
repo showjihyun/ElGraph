@@ -320,16 +320,19 @@ defmodule ElGraph.Executor do
       thread_id: meta.thread_id,
       step: step,
       node: node,
-      # entry_key는 fan-out 인스턴스를 구분한다 — 일반 노드는 노드 이름, :send는 {target, index}.
-      node_key: entry_key,
-      event_sink: meta.event_sink,
       assigns: meta.assigns,
-      resume_values: resume_values(meta, node, step),
-      interrupt_counter: :counters.new(1, []),
-      cancel_flag: meta.cancel_flag,
-      task_cache: meta.task_cache,
-      # 서브그래프(call_node)가 자신의 fan-out에 같은 상한을 물려받도록 컨텍스트에 싣는다.
-      max_concurrency: meta.max_concurrency
+      # 실행기 배선은 노드 인터페이스 밖(ctx.private)에 격리한다.
+      private: %Ctx.Internal{
+        # entry_key는 fan-out 인스턴스를 구분한다 — 일반 노드는 노드 이름, :send는 {target, index}.
+        node_key: entry_key,
+        event_sink: meta.event_sink,
+        resume_values: resume_values(meta, node, step),
+        interrupt_counter: :counters.new(1, []),
+        cancel_flag: meta.cancel_flag,
+        task_cache: meta.task_cache,
+        # 서브그래프(call_node)가 자신의 fan-out에 같은 상한을 물려받도록 싣는다.
+        max_concurrency: meta.max_concurrency
+      }
     }
 
     # :send의 입력은 상태가 아니라 send가 지정한 맵이다 (SPEC §3.2).
@@ -430,7 +433,8 @@ defmodule ElGraph.Executor do
   # 동시성 상한은 물려준다 — 안 그러면 중첩 fan-out이 코어 수로 재기본화돼 곱해진다.
   defp call_node(%Graph{} = subgraph, state, ctx) do
     shared_input = Map.take(state, Map.keys(subgraph.state_def))
-    opts = if ctx.max_concurrency, do: [max_concurrency: ctx.max_concurrency], else: []
+    max_concurrency = Ctx.internal(ctx).max_concurrency
+    opts = if max_concurrency, do: [max_concurrency: max_concurrency], else: []
 
     case run(subgraph, shared_input, opts) do
       {:ok, final} -> Map.take(final, Map.keys(state))

@@ -44,6 +44,22 @@ delta stream (a Provider's `decode_usage/1` returns partial usage the Driver
 merges).
 _Avoid_: tokens, cost, metering.
 
+## Language — Node context
+
+**Ctx**:
+The execution context every node receives as its second argument (`(state, ctx)`,
+fixed by SPEC §3.2). Its **public interface** is small: the fields
+`thread_id`/`step`/`node`/`assigns` plus the functions `emit/2`, `interrupt/2`,
+`cancelled?/1`, `memo/3`. That is the whole surface a node author must learn.
+_Avoid_: state (that's the node's first argument), env, metadata.
+
+**Ctx.Internal**:
+The executor's per-invocation wiring (event sink, cancel flag, task cache,
+interrupt counter, fan-out node key, concurrency limit), quarantined behind the
+opaque `ctx.private` field. Nodes never touch it; the public Ctx functions read
+from it. It can evolve without changing the public `Ctx` type.
+_Avoid_: private (the field name), guts, opaque (describe the role, not the keyword).
+
 ## Example dialogue
 
 > **Dev:** The OpenAI adapter re-parses the stream twice — once to emit, once to
