@@ -15,11 +15,30 @@ defmodule ElGraph.DurabilityTest.FailingCheckpointer do
   def list(_config, _thread_id), do: []
 end
 
+defmodule ElGraph.DurabilityTest.RaisingCheckpointer do
+  @moduledoc false
+  # 쓰기가 예외를 raise하는 체크포인터 — 프로덕션 어댑터(Postgres SQL.query!, Redis
+  # `{:ok,_}=Redix...`)는 I/O 오류 시 {:error}를 반환하지 않고 raise한다. :async writer가
+  # 이를 격리하지 못하면 spawn_link로 executor(동기 invoke면 호출자)까지 죽는다.
+  @behaviour ElGraph.Checkpointer
+
+  @impl true
+  def put(_config, _checkpoint), do: raise("write boom")
+  @impl true
+  def get(_config, _thread_id, _step), do: :not_found
+  @impl true
+  def put_writes(_config, _thread_id, _step, _writes), do: raise("write boom")
+  @impl true
+  def get_writes(_config, _thread_id, _step), do: []
+  @impl true
+  def list(_config, _thread_id), do: []
+end
+
 defmodule ElGraph.DurabilityTest do
   use ExUnit.Case, async: true
 
   alias ElGraph.Checkpointer.ETS
-  alias ElGraph.DurabilityTest.FailingCheckpointer
+  alias ElGraph.DurabilityTest.{FailingCheckpointer, RaisingCheckpointer}
   alias ElGraph.{Checkpoint, TestNodes}
 
   # a → b → c : superstep마다 체크포인트가 찍히는 선형 그래프 (sync면 step 0..3 = 4개).
@@ -136,6 +155,22 @@ defmodule ElGraph.DurabilityTest do
 
       assert_receive {[:el_graph, :checkpoint, :error], ^ref, %{},
                       %{thread_id: "t", reason: :disk_full}}
+    end
+
+    test "raise하는 어댑터에도 writer가 죽지 않고 telemetry로 알린 뒤 실행을 끝낸다" do
+      ref = :telemetry_test.attach_event_handlers(self(), [[:el_graph, :checkpoint, :error]])
+
+      # 프로덕션 어댑터처럼 put이 raise해도, spawn_link된 writer가 죽으며 (동기 invoke의)
+      # 호출 프로세스까지 끌고 죽으면 안 된다 — 격리해 telemetry로 변환하고 실행은 완료된다.
+      assert {:ok, _} =
+               ElGraph.invoke(linear_graph(), %{},
+                 checkpointer: {RaisingCheckpointer, :cfg},
+                 thread_id: "t",
+                 durability: :async
+               )
+
+      assert_receive {[:el_graph, :checkpoint, :error], ^ref, %{},
+                      %{thread_id: "t", reason: %RuntimeError{message: "write boom"}}}
     end
   end
 

@@ -132,7 +132,8 @@ defmodule ElGraph.Executor do
       max_steps: Keyword.get(opts, :max_steps, @default_max_steps),
       # 한 superstep의 병렬 노드 동시 실행 상한. 기본은 코어 수(CPU 바운드에 적합) —
       # LLM/HTTP 같은 I/O 바운드 fan-out은 더 높게 주는 게 유리하다 (SPEC §3.4).
-      max_concurrency: Keyword.get(opts, :max_concurrency, System.schedulers_online()),
+      max_concurrency:
+        validate_max_concurrency(Keyword.get(opts, :max_concurrency, System.schedulers_online())),
       interrupt_before: Keyword.get(opts, :interrupt_before, []),
       interrupts: %{},
       interrupt_step: nil,
@@ -149,6 +150,12 @@ defmodule ElGraph.Executor do
   defp validate_durability(other),
     do:
       raise(ArgumentError, ":durability must be :sync, :async, or :exit, got: #{inspect(other)}")
+
+  defp validate_max_concurrency(n) when is_integer(n) and n > 0, do: n
+
+  defp validate_max_concurrency(other),
+    do:
+      raise(ArgumentError, ":max_concurrency must be a positive integer, got: #{inspect(other)}")
 
   defp with_span(meta, fun) do
     :telemetry.span([:el_graph, :invoke], %{thread_id: meta.thread_id}, fn ->
@@ -323,7 +330,9 @@ defmodule ElGraph.Executor do
       resume_values: resume_values(meta, node, step),
       interrupt_counter: :counters.new(1, []),
       cancel_flag: meta.cancel_flag,
-      task_cache: meta.task_cache
+      task_cache: meta.task_cache,
+      # 서브그래프(call_node)가 자신의 fan-out에 같은 상한을 물려받도록 컨텍스트에 싣는다.
+      max_concurrency: meta.max_concurrency
     }
 
     # :send의 입력은 상태가 아니라 send가 지정한 맵이다 (SPEC §3.2).
@@ -421,10 +430,12 @@ defmodule ElGraph.Executor do
 
   # 서브그래프 (SPEC §3.10): 부모와 이름이 겹치는 상태 키(공유 채널)로 입출력한다.
   # 내부 체크포인트/인터럽트는 아직 지원하지 않는다 — {:ok, _} 외의 결과는 노드 크래시.
-  defp call_node(%Graph{} = subgraph, state, _ctx) do
+  # 동시성 상한은 물려준다 — 안 그러면 중첩 fan-out이 코어 수로 재기본화돼 곱해진다.
+  defp call_node(%Graph{} = subgraph, state, ctx) do
     shared_input = Map.take(state, Map.keys(subgraph.state_def))
+    opts = if ctx.max_concurrency, do: [max_concurrency: ctx.max_concurrency], else: []
 
-    case run(subgraph, shared_input, []) do
+    case run(subgraph, shared_input, opts) do
       {:ok, final} -> Map.take(final, Map.keys(state))
       other -> raise ElGraph.SubgraphError, result: other
     end
@@ -641,11 +652,11 @@ defmodule ElGraph.Executor do
   defp writer_loop({mod, config} = cp) do
     receive do
       {:put, checkpoint} ->
-        report_write(mod.put(config, checkpoint), checkpoint.thread_id, checkpoint.step)
+        guard_write(fn -> mod.put(config, checkpoint) end, checkpoint.thread_id, checkpoint.step)
         writer_loop(cp)
 
       {:put_writes, thread_id, step, writes} ->
-        report_write(mod.put_writes(config, thread_id, step, writes), thread_id, step)
+        guard_write(fn -> mod.put_writes(config, thread_id, step, writes) end, thread_id, step)
         writer_loop(cp)
 
       {:flush, from} ->
@@ -659,9 +670,22 @@ defmodule ElGraph.Executor do
 
   # :async writer는 호출자에 반환값을 돌려줄 수 없으므로, 쓰기 실패를 조용히 삼키지 않고
   # telemetry로 노출한다(SPEC §3.5의 async 트레이드오프는 "마지막 step 유실"이지 "무신호"가 아니다).
-  defp report_write(:ok, _thread_id, _step), do: :ok
+  # 반환된 {:error,_}뿐 아니라 raise/exit하는 어댑터(Postgres SQL.query!, Redis `{:ok,_}=...`)도
+  # 격리한다 — 그러지 않으면 spawn_link된 writer가 죽으며 executor(동기 invoke면 호출자)까지
+  # 끌고 죽는다. 실패한 step은 유실되지만 실행 자체는 계속된다.
+  defp guard_write(fun, thread_id, step) do
+    case fun.() do
+      :ok -> :ok
+      {:error, reason} -> emit_write_error(thread_id, step, reason)
+      _other -> :ok
+    end
+  rescue
+    exception -> emit_write_error(thread_id, step, exception)
+  catch
+    :exit, reason -> emit_write_error(thread_id, step, {:exit, reason})
+  end
 
-  defp report_write({:error, reason}, thread_id, step) do
+  defp emit_write_error(thread_id, step, reason) do
     :telemetry.execute([:el_graph, :checkpoint, :error], %{}, %{
       thread_id: thread_id,
       step: step,

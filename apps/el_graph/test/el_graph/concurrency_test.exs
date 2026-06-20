@@ -64,5 +64,52 @@ defmodule ElGraph.ConcurrencyTest do
       assert {:ok, %{results: results}} = Task.await(task, 1_000)
       assert [1, 2, 3] = Enum.sort(results)
     end
+
+    test "propagates into subgraphs so nested fan-out also respects the limit" do
+      sub = fanout_graph()
+
+      graph =
+        ElGraph.new()
+        |> ElGraph.state(:results, default: [], reducer: {Reducers, :append, []})
+        |> ElGraph.add_node(:sub, sub)
+        |> ElGraph.compile(entry: :sub)
+
+      task = Task.async(fn -> ElGraph.invoke(graph, %{}, max_concurrency: 1) end)
+
+      # 서브그래프 내부 fan-out도 부모의 상한(1)을 따라 직렬화돼야 한다 —
+      # 안 그러면 중첩 fan-out에서 동시성이 곱해진다.
+      assert_receive {:started, 1, p1}, 1_000
+      refute_receive {:started, _, _}, 50
+      send(p1, :go)
+
+      assert_receive {:started, 2, p2}, 1_000
+      send(p2, :go)
+
+      assert_receive {:started, 3, p3}, 1_000
+      send(p3, :go)
+
+      assert {:ok, _} = Task.await(task, 1_000)
+    end
+  end
+
+  describe ":max_concurrency validation" do
+    defp single_node_graph do
+      ElGraph.new()
+      |> ElGraph.state(:result)
+      |> ElGraph.add_node(:a, &TestNodes.noop/2)
+      |> ElGraph.compile(entry: :a)
+    end
+
+    test "rejects a non-positive-integer max_concurrency up front" do
+      # 잘못된 값은 fan-out이 일어나기 전에(빌드 시점) 거부돼야 한다 — 단일 노드 그래프라
+      # async_stream을 타지 않으므로, 가드가 없으면 그냥 {:ok}로 통과해 버린다.
+      assert_raise ArgumentError, ~r/max_concurrency/, fn ->
+        ElGraph.invoke(single_node_graph(), %{}, max_concurrency: 0)
+      end
+
+      assert_raise ArgumentError, ~r/max_concurrency/, fn ->
+        ElGraph.invoke(single_node_graph(), %{}, max_concurrency: :lots)
+      end
+    end
   end
 end
