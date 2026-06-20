@@ -4,7 +4,7 @@ defmodule ElGraphEcto.MixProject do
   def project do
     [
       app: :el_graph_ecto,
-      version: "0.3.0",
+      version: "0.4.0",
       build_path: "../../_build",
       config_path: "../../config/config.exs",
       deps_path: "../../deps",
@@ -16,6 +16,8 @@ defmodule ElGraphEcto.MixProject do
       dialyzer: dialyzer(),
       description: "Postgres durable checkpointer for ElGraph (Ecto/Postgrex).",
       source_url: "https://github.com/showjihyun/ElGraph",
+      name: "el_graph_ecto",
+      docs: [main: "readme", extras: ["README.md": [title: "Overview"]], source_ref: "v0.4.0"],
       package: package()
     ]
   end
@@ -37,7 +39,7 @@ defmodule ElGraphEcto.MixProject do
       licenses: ["MIT"],
       maintainers: ["Poor Coin Pepe"],
       links: %{"GitHub" => "https://github.com/showjihyun/ElGraph"},
-      files: ~w(lib mix.exs)
+      files: ~w(lib mix.exs README.md)
     ]
   end
 
@@ -52,10 +54,17 @@ defmodule ElGraphEcto.MixProject do
 
   defp deps do
     [
-      {:el_graph, in_umbrella: true},
+      {:el_graph, el_graph_dep()},
       {:ecto_sql, "~> 3.12"},
       {:postgrex, "~> 0.20"},
-      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
+  end
+
+  # Hex는 umbrella/path 의존성을 거부한다. 배포 시(HEX_PUBLISH=1) Hex 버전으로,
+  # 평소 umbrella 개발/테스트에선 로컬 소스(in_umbrella)로 해석한다.
+  defp el_graph_dep do
+    if System.get_env("HEX_PUBLISH"), do: "~> 0.3", else: [in_umbrella: true]
   end
 end

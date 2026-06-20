@@ -3,11 +3,16 @@
 이 프로젝트의 주요 변경 사항. 형식은 [Keep a Changelog](https://keepachangelog.com/),
 버전은 [SemVer](https://semver.org/)를 따른다.
 
-## [Unreleased]
+## [0.4.0] — 2026-06-20
 
 적대적 감사(다중 에이전트 차원별 검증)에서 도출한 5개 갭 클로저. 보안 기본값 강화, 성능
 주장 입증(벤치마크), 핵심 API 테스트 보강, 문서 정확성. 모든 변경 TDD. 기본 스위트 629
 + DB 어댑터 55(Postgres/Valkey) 통과.
+
+**배포 범위**: 수정이 담긴 형제 앱 `el_graph_web`·`el_graph_ecto`·`el_graph_redis`를 0.4.0으로
+**첫 Hex 배포**. 코어 `el_graph`는 published 콘텐츠 변경이 없어 **0.3.0 유지**(형제 앱은
+`{:el_graph, "~> 0.3"}`에 의존). 형제 앱의 el_graph 의존성은 `HEX_PUBLISH=1`일 때만 Hex
+버전으로, 평소 umbrella 개발에선 `in_umbrella`로 해석된다.
 
 ### Security (일부 **breaking**)
 
