@@ -32,7 +32,18 @@ defmodule ElGraph.Sensor.Server do
   @impl GenServer
   def handle_call(:tick, _from, state), do: {:reply, :ok, do_poll(state)}
 
+  # poll/dispatch는 사용자 콜백이므로 격리한다 — 일시적 오류(네트워크 blip 등)에 센서가
+  # 죽으면 sensor_state(커서/타임스탬프 등)를 잃고 폴링이 멈춘다. 오류는 telemetry로 알리고
+  # 직전 상태를 보존한 채 계속 폴링한다(다음 주기 재시도; at-least-once + 멱등 수신, SPEC §6).
   defp do_poll(state) do
+    run_poll(state)
+  rescue
+    error ->
+      :telemetry.execute([:el_graph, :sensor, :error], %{}, %{sensor: state.module, error: error})
+      state
+  end
+
+  defp run_poll(state) do
     case state.module.poll(state.sensor_state) do
       {:signal, signal, next} ->
         :telemetry.execute(

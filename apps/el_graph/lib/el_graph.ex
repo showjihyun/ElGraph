@@ -99,6 +99,8 @@ defmodule ElGraph do
   ## 옵션
 
     * `:max_steps` — superstep 상한 (기본 25). 초과 시 `{:error, {:max_steps_exceeded, _}}`
+    * `:max_concurrency` — 한 superstep의 병렬 노드 동시 실행 상한 (기본 코어 수).
+      LLM/HTTP 같은 I/O 바운드 fan-out은 더 높게 주는 게 유리하다 (SPEC §3.4)
     * `:thread_id` — 실행 식별자 (기본 자동 생성). 체크포인트/재개의 키
     * `:event_sink` — `ElGraph.Ctx.emit/2` 이벤트를 받을 pid
     * `:checkpointer` — `{module, config}`. 지정 시 초기 상태와 매 superstep 후 체크포인트 저장

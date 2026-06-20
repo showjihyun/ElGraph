@@ -130,6 +130,9 @@ defmodule ElGraph.Executor do
       assigns: Keyword.get(opts, :assigns, %{}),
       checkpointer: Keyword.get(opts, :checkpointer),
       max_steps: Keyword.get(opts, :max_steps, @default_max_steps),
+      # 한 superstep의 병렬 노드 동시 실행 상한. 기본은 코어 수(CPU 바운드에 적합) —
+      # LLM/HTTP 같은 I/O 바운드 fan-out은 더 높게 주는 게 유리하다 (SPEC §3.4).
+      max_concurrency: Keyword.get(opts, :max_concurrency, System.schedulers_online()),
       interrupt_before: Keyword.get(opts, :interrupt_before, []),
       interrupts: %{},
       interrupt_step: nil,
@@ -300,6 +303,7 @@ defmodule ElGraph.Executor do
         {entry, exec_node(graph, entry, state, step, meta)}
       end,
       ordered: true,
+      max_concurrency: meta.max_concurrency,
       timeout: :infinity
     )
     |> Enum.map(fn {:ok, tagged} -> tagged end)
