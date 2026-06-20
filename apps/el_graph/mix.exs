@@ -21,7 +21,16 @@ defmodule ElGraph.MixProject do
       name: "ElGraph",
       docs: [
         main: "readme",
-        extras: ["README.md": [title: "Overview"], LICENSE: [title: "License"]],
+        extras: [
+          "README.md": [title: "Overview"],
+          "guides/adding-a-tool.md": [title: "Adding a tool"],
+          "guides/human-in-the-loop.md": [title: "Human-in-the-loop"],
+          "guides/checkpointers.md": [title: "Choosing a checkpointer"],
+          "guides/streaming.md": [title: "Streaming"],
+          "guides/req-llm.md": [title: "Using ReqLLM (1000+ models)"],
+          LICENSE: [title: "License"]
+        ],
+        groups_for_extras: [Guides: ~r"guides/"],
         source_ref: "v0.3.0"
       ],
       package: package()
@@ -37,7 +46,7 @@ defmodule ElGraph.MixProject do
         "GitHub" => "https://github.com/showjihyun/ElGraph",
         "Changelog" => "https://github.com/showjihyun/ElGraph/blob/main/CHANGELOG.md"
       },
-      files: ~w(lib mix.exs README.md LICENSE)
+      files: ~w(lib guides mix.exs README.md LICENSE)
     ]
   end
 
