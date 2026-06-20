@@ -60,6 +60,14 @@ opaque `ctx.private` field. Nodes never touch it; the public Ctx functions read
 from it. It can evolve without changing the public `Ctx` type.
 _Avoid_: private (the field name), guts, opaque (describe the role, not the keyword).
 
+**Event**:
+The envelope `ElGraph.stream/3` emits, declared by `ElGraph.Event`. Two variants:
+a **node event** (`thread_id`/`step`/`node`/`event` — lifecycle, tokens, tool
+calls, `Ctx.emit/2` events) and a **run event** (`thread_id` + `{:done, _}` or
+`{:down, _}`, no step/node). It is the seam between a run and its consumers
+(AGUI, A2A, OTel, the web SSE server, ElTrace); built only via `Event.node/done/down`.
+_Avoid_: message (overloaded with LLM messages), payload, telemetry event.
+
 ## Example dialogue
 
 > **Dev:** The OpenAI adapter re-parses the stream twice — once to emit, once to

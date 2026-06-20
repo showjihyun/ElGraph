@@ -184,10 +184,10 @@ defmodule ElGraph.Runner do
         {[payload], run}
 
       {:el_graph_run, ^pid, result} ->
-        {[%{thread_id: thread_id, event: {:done, result}}], {:done, run}}
+        {[ElGraph.Event.done(thread_id, result)], {:done, run}}
 
       {:DOWN, ^ref, :process, ^pid, reason} ->
-        {[%{thread_id: thread_id, event: {:down, reason}}], {:done, run}}
+        {[ElGraph.Event.down(thread_id, reason)], {:done, run}}
     end
   end
 

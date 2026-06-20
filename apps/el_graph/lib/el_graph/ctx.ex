@@ -41,6 +41,7 @@ defmodule ElGraph.Ctx do
   """
 
   alias ElGraph.Ctx.Internal
+  alias ElGraph.Event
 
   defstruct [:thread_id, :step, :node, assigns: %{}, private: nil]
 
@@ -71,12 +72,7 @@ defmodule ElGraph.Ctx do
         :ok
 
       sink when is_pid(sink) ->
-        send(
-          sink,
-          {:el_graph_event,
-           %{thread_id: ctx.thread_id, step: ctx.step, node: ctx.node, event: event}}
-        )
-
+        send(sink, {:el_graph_event, Event.node(ctx.thread_id, ctx.step, ctx.node, event)})
         :ok
     end
   end
