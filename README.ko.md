@@ -165,6 +165,103 @@ mix phx.server
 
 ---
 
+## 🧩 ElGraph가 빛나는 곳
+
+ElGraph의 강점이 Agentic AI 시대의 실제 수요 — **내구성·사람 감독·결함 격리** — 와 맞아떨어지는
+세 지점. 핵심은 "더 빠른 처리량"이 아니다.
+
+### 1. 고위험 행동의 사람 승인 게이트 — *거버넌스 / 감독*
+
+**수요:** 현실 행동(환불·결제·배포)을 하는 에이전트는 되돌릴 수 없는 단계 전에 사람의 승인을 위해
+멈춰야 한다 — 그 대기는 몇 시간·며칠, 프로세스 재시작을 넘길 수 있다.
+**ElGraph의 강점:** `Ctx.interrupt/2`가 멈추고 *체크포인트를 저장*한다. 대기 중 OS 프로세스가
+죽어도 `resume`이 완료된 작업을 재실행하지 않고 결정을 주입한다. 거절한 분기는 time-travel로 따로 탐색.
+
+```elixir
+# 계획 → 사람을 위해 멈춤(내구적) → 승인 후에만 실행.
+approve = fn %{action: a, amount: amt}, ctx ->
+  %{decision: Ctx.interrupt(ctx, %{review: a, amount: amt})}
+end
+
+graph =
+  ElGraph.new()
+  |> ElGraph.state(:action) |> ElGraph.state(:amount) |> ElGraph.state(:decision)
+  |> ElGraph.add_node(:plan, &Planner.run/2)       # LLM이 고위험 행동을 제안
+  |> ElGraph.add_node(:approve, approve)           # ← 사람 게이트(체크포인트됨)
+  |> ElGraph.add_node(:execute, &Executor.run/2)   # 승인 후에만 실행
+  |> ElGraph.add_edge(:plan, :approve)
+  |> ElGraph.add_edge(:approve, :execute)
+  |> ElGraph.compile(entry: :plan)
+
+cp = {ElGraph.Checkpointer.Postgres, ElGraph.Checkpointer.Postgres.config(MyApp.Repo)}
+
+{:interrupted, %{payload: review}} = ElGraph.invoke(graph, input, checkpointer: cp, thread_id: id)
+# → `review`를 UI에 표시; 몇 시간 뒤, 어떤 노드/프로세스에서든:
+{:ok, result} = ElGraph.resume(graph, checkpointer: cp, thread_id: id, resume: "approved")
+```
+
+### 2. 크래시에 강한 장시간 에이전트 — *신뢰성(에이전트용 Temporal)*
+
+**수요:** 딥리서치·멀티툴·수시간 에이전트는 일시적 실패(레이트리밋, 불안정 API)를 만난다. 재시도
+시 비싼 LLM 호출을 다시 돌리거나 완료된 병렬 작업을 잃으면 안 된다.
+**ElGraph의 강점:** step별 체크포인트 + `Ctx.memo/3`(재개·재시도 시 LLM/툴 호출 재실행 안 함) +
+부분 실패 보존(병렬 팬아웃이 절반 실패해도 성공분 보존) + 노드별 `retry:`.
+
+```elixir
+# 비싼 LLM 작업을 메모이즈 — 크래시를 넘겨 재개·재시도해도 다시 돌지 않는다.
+research = fn %{topic: t}, ctx ->
+  %{findings: Ctx.memo(ctx, {:research, t}, fn -> deep_research(t) end)}
+end
+
+graph =
+  ElGraph.new()
+  |> ElGraph.state(:topic) |> ElGraph.state(:findings) |> ElGraph.state(:report)
+  |> ElGraph.add_node(:research, research)
+  |> ElGraph.add_node(:source_a, &SourceA.fetch/2)  # 병렬 형제: 하나가 도중 실패해도
+  |> ElGraph.add_node(:source_b, &SourceB.fetch/2)  # 다른 쪽의 완료 작업은 보존된다
+  |> ElGraph.add_node(:write, &Writer.run/2, retry: [max: 3, backoff: :exponential])
+  |> ElGraph.add_edge(:research, :source_a)
+  |> ElGraph.add_edge(:research, :source_b)
+  |> ElGraph.add_edge(:source_a, :write)
+  |> ElGraph.add_edge(:source_b, :write)
+  |> ElGraph.compile(entry: :research)
+
+# Mnesia = 디스크 영속·외부 인프라 0. 도중 크래시 → 마지막 체크포인트부터 재개;
+# 완료된 노드와 메모이즈된 LLM 호출은 재실행하지 않는다(중복 과금 없음).
+cp = {ElGraph.Checkpointer.Mnesia, ElGraph.Checkpointer.Mnesia.config(pid)}
+ElGraph.invoke(graph, %{topic: "..."}, checkpointer: cp, thread_id: "job-42")
+```
+
+### 3. 결함 격리된 에이전트 플릿 — *운영 규모*
+
+**수요:** 장수명 에이전트를 다수 동시 운영(사용자별 비서·모니터링·지원 플릿)할 때, 폭주하거나 죽는
+한 에이전트가 나머지를 절대 무너뜨리면 안 된다 — 멀티 에이전트 오케스트레이션과 실시간 관측도 필요.
+**ElGraph의 강점:** BEAM이 각 에이전트에 선점 스케줄링되는 **결함 격리** 프로세스를 준다.
+오케스트레이션 템플릿(`supervisor` / `group_chat` / `magentic`)이 이들을 조율하고, ElTrace가 모든
+실행을 실시간으로 보여준다. *(정직한 단서: I/O 대기형 LLM 호출에선 이점이 "속도"가 아니라 격리·
+내구·값싼 장수명 세션이다.)*
+
+```elixir
+# 슈퍼바이저 에이전트가 전문 워커(각자 자기 BEAM 프로세스)로 라우팅한다.
+team = ElGraph.Orchestration.supervisor(llm, [researcher, coder, support], max_steps: 16)
+
+# 독립적인 장수명 사용자별 에이전트를 수천 개 팬아웃. 스케줄러가 모든 코어를 쓰고,
+# 한 실행의 크래시·폭주는 완전히 격리된다 — 나머지는 계속 돈다.
+1..10_000
+|> Task.async_stream(
+     fn user ->
+       ElGraph.invoke(team, %{messages: [LLM.user(user.request)]},
+         checkpointer: cp, thread_id: "user-#{user.id}")
+     end,
+     max_concurrency: System.schedulers_online() * 50,
+     ordered: false
+   )
+|> Stream.run()
+# 모든 실행을 실시간으로 — 승인/거절, "여기서 분기" — ElTrace UI에서 본다.
+```
+
+---
+
 ## ⚖️ LangChain · LangGraph vs ElGraph
 
 > 한 줄 요약: **LangGraph가 Python에서 "라이브러리로 재구현"해야 했던 것들이 BEAM에선 런타임 기본이다.**
