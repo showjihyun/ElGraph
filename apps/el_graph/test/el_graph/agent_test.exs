@@ -4,6 +4,30 @@ defmodule ElGraph.AgentTest do
   alias ElGraph.{Agent, Reducers, Signal, TestAgent, TestNodes}
   alias ElGraph.Checkpointer.ETS
 
+  # 시작을 알리고 :go까지 블록한다 — 에이전트 실행의 fan-out 동시성 관찰용.
+  def gated_worker(%{item: item}, _ctx, test) do
+    send(test, {:started, item, self()})
+
+    receive do
+      :go -> :ok
+    end
+
+    %{results: [item]}
+  end
+
+  defp fanout_graph(test) do
+    {graph, _warning} =
+      ExUnit.CaptureIO.with_io(:stderr, fn ->
+        ElGraph.new()
+        |> ElGraph.state(:results, default: [], reducer: {Reducers, :append, []})
+        |> ElGraph.add_node(:plan, {TestNodes, :plan_sends, [[1, 2, 3], :worker]})
+        |> ElGraph.add_node(:worker, {__MODULE__, :gated_worker, [test]})
+        |> ElGraph.compile(entry: :plan)
+      end)
+
+    graph
+  end
+
   defp sequential_graph do
     ElGraph.new()
     |> ElGraph.state(:result)
@@ -29,6 +53,30 @@ defmodule ElGraph.AgentTest do
       Agent.send_signal(agent, signal())
 
       assert_receive {:agent_result, "a1", {:ok, %{result: "HELLO"}}}
+    end
+
+    test "forwards :max_concurrency to the run so agent fan-out respects the limit" do
+      test = self()
+
+      agent =
+        start_supervised!(
+          {TestAgent, graph: fanout_graph(test), id: "mc", owner: test, max_concurrency: 1}
+        )
+
+      Agent.send_signal(agent, signal())
+
+      # max_concurrency: 1이 run까지 전달되면 fan-out 워커가 한 번에 하나만 시작한다.
+      assert_receive {:started, 1, p1}, 1_000
+      refute_receive {:started, _, _}, 50
+      send(p1, :go)
+
+      assert_receive {:started, 2, p2}, 1_000
+      send(p2, :go)
+
+      assert_receive {:started, 3, p3}, 1_000
+      send(p3, :go)
+
+      assert_receive {:agent_result, "mc", {:ok, _}}, 1_000
     end
 
     test "handle_signal can ignore signals" do

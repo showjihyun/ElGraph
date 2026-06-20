@@ -19,7 +19,8 @@ defmodule ElGraph.Ctx do
     interrupt_counter: nil,
     cancel_flag: nil,
     assigns: %{},
-    task_cache: nil
+    task_cache: nil,
+    max_concurrency: nil
   ]
 
   @typedoc """
@@ -39,7 +40,8 @@ defmodule ElGraph.Ctx do
           interrupt_counter: :counters.counters_ref() | nil,
           cancel_flag: :atomics.atomics_ref() | nil,
           assigns: map(),
-          task_cache: :ets.tid() | nil
+          task_cache: :ets.tid() | nil,
+          max_concurrency: pos_integer() | nil
         }
 
   @doc """
