@@ -7,37 +7,13 @@ defmodule ElGraph.LLM.GeminiStreamTest do
   defp text_chunk(text),
     do: %{"candidates" => [%{"content" => %{"parts" => [%{"text" => text}]}}]}
 
-  describe "decode_deltas/1 — per-chunk delta events" do
+  describe "decode_deltas/2 — per-chunk delta events" do
     test "yields a token event for a text part" do
-      assert [{:token, "Hello"}] = Gemini.decode_deltas(text_chunk("Hello"))
+      assert {[{:token, "Hello"}], _} =
+               Gemini.decode_deltas(text_chunk("Hello"), Gemini.init_stream_state())
     end
 
-    test "yields nothing for a functionCall chunk" do
-      assert [] =
-               Gemini.decode_deltas(%{
-                 "candidates" => [
-                   %{
-                     "content" => %{
-                       "parts" => [%{"functionCall" => %{"name" => "x", "args" => %{}}}]
-                     }
-                   }
-                 ]
-               })
-    end
-
-    test "yields nothing for a usage-only chunk" do
-      assert [] =
-               Gemini.decode_deltas(%{
-                 "usageMetadata" => %{"promptTokenCount" => 1, "candidatesTokenCount" => 2}
-               })
-    end
-  end
-
-  describe "stream_step/3 — tool-call deltas (Gemini sends functionCall whole)" do
-    test "emits tool_call_start/delta/end for a functionCall part" do
-      parent = self()
-      on_delta = fn d -> send(parent, {:d, d}) end
-
+    test "synthesizes start/delta/end for a whole functionCall part" do
       chunk = %{
         "candidates" => [
           %{
@@ -48,68 +24,32 @@ defmodule ElGraph.LLM.GeminiStreamTest do
         ]
       }
 
-      Gemini.stream_step(chunk, Gemini.new_stream_acc(), on_delta)
+      assert {[
+                {:tool_call_start, "web_search", "web_search"},
+                {:tool_call_delta, "web_search", args_json},
+                {:tool_call_end, "web_search"}
+              ], _} = Gemini.decode_deltas(chunk, Gemini.init_stream_state())
 
-      assert_received {:d, {:tool_call_start, "web_search", "web_search"}}
-      assert_received {:d, {:tool_call_delta, "web_search", args_json}}
-      assert_received {:d, {:tool_call_end, "web_search"}}
       assert args_json =~ "x"
     end
 
-    test "emits a token for a text part" do
-      parent = self()
-
-      Gemini.stream_step(text_chunk("hi"), Gemini.new_stream_acc(), fn d ->
-        send(parent, {:d, d})
-      end)
-
-      assert_received {:d, {:token, "hi"}}
+    test "yields nothing for a usage-only chunk" do
+      assert {[], _} =
+               Gemini.decode_deltas(
+                 %{"usageMetadata" => %{"promptTokenCount" => 1, "candidatesTokenCount" => 2}},
+                 Gemini.init_stream_state()
+               )
     end
   end
 
-  describe "reduce_chunks/1 — assemble final response" do
-    test "concatenates text deltas into the assistant message" do
-      chunks = [text_chunk("Hel"), text_chunk("lo"), text_chunk(" world")]
+  describe "decode_usage/1" do
+    test "extracts usage from usageMetadata, nil otherwise" do
+      assert %{input_tokens: 10, output_tokens: 3} =
+               Gemini.decode_usage(%{
+                 "usageMetadata" => %{"promptTokenCount" => 10, "candidatesTokenCount" => 3}
+               })
 
-      assert {:ok, %{message: %{role: :assistant, content: "Hello world", tool_calls: []}}} =
-               Gemini.reduce_chunks(chunks)
-    end
-
-    test "captures usage from the last non-nil usageMetadata" do
-      chunks = [
-        text_chunk("hi"),
-        %{
-          "candidates" => [%{"content" => %{"parts" => [%{"text" => "!"}]}}],
-          "usageMetadata" => %{"promptTokenCount" => 10, "candidatesTokenCount" => 3}
-        }
-      ]
-
-      assert {:ok, %{usage: %{input_tokens: 10, output_tokens: 3}}} =
-               Gemini.reduce_chunks(chunks)
-    end
-
-    test "nil content with accumulated tool_calls when only a functionCall streams" do
-      chunks = [
-        %{
-          "candidates" => [
-            %{
-              "content" => %{
-                "parts" => [
-                  %{"functionCall" => %{"name" => "web_search", "args" => %{"q" => "elixir"}}}
-                ]
-              }
-            }
-          ]
-        }
-      ]
-
-      assert {:ok,
-              %{
-                message: %{
-                  content: nil,
-                  tool_calls: [%{id: "web_search", name: "web_search", args: %{"q" => "elixir"}}]
-                }
-              }} = Gemini.reduce_chunks(chunks)
+      assert nil == Gemini.decode_usage(text_chunk("hi"))
     end
   end
 

@@ -4,7 +4,7 @@ defmodule ElGraph.LLM.GeminiTest do
   alias ElGraph.LLM
   alias ElGraph.LLM.Gemini
 
-  describe "build_request/3" do
+  describe "request_spec/4" do
     test "converts a full conversation with tools" do
       messages = [
         LLM.user("검색해줘"),
@@ -15,7 +15,7 @@ defmodule ElGraph.LLM.GeminiTest do
       tools = [%{name: "web_search", description: "검색", input_schema: %{"type" => "object"}}]
 
       request =
-        Gemini.build_request([api_key: "test-key"], messages, tools: tools, system: "봇")
+        Gemini.request_spec([api_key: "test-key"], messages, [tools: tools, system: "봇"], :chat)
 
       assert request.url =~ "generativelanguage.googleapis.com"
       assert request.url =~ ":generateContent"

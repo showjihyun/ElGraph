@@ -1,40 +1,35 @@
 defmodule ElGraph.LLM.Gemini do
   @moduledoc """
-  Google Gemini generateContent API 어댑터 (`chat/3` 비스트리밍 + `stream_chat/3` SSE 스트리밍).
+  Google Gemini generateContent API 어댑터. 전송·SSE·fold·usage·telemetry는
+  `ElGraph.LLM.Driver`가 맡고, 이 모듈은 Gemini 고유의 요청 형태·응답 파싱·청크 디코딩만 공급한다.
 
   config: `:api_key`(필수), `:model`(기본 gemini-2.5-flash), `:req_options`.
-  Gemini는 tool call id가 없어 이름으로 매칭한다 — 중립 메시지의 `id`에 툴 이름이
-  들어가며, 같은 superstep에서 동일 툴의 중복 호출은 구분되지 않는다.
+  Gemini는 tool call id가 없어 이름으로 매칭한다 — 중립 메시지의 `id`에 툴 이름이 들어가며,
+  같은 superstep에서 동일 툴의 중복 호출은 구분되지 않는다.
   어댑터는 자체 재시도를 하지 않는다 — 노드 `retry:` 정책이 담당한다.
   """
 
   @behaviour ElGraph.LLM
+  @behaviour ElGraph.LLM.Provider
 
   alias ElGraph.LLM
+  alias ElGraph.LLM.Driver
 
   @base_url "https://generativelanguage.googleapis.com/v1beta/models"
   @default_model "gemini-2.5-flash"
 
   @impl ElGraph.LLM
-  def chat(config, messages, opts) do
-    request = build_request(config, messages, opts)
-    req_options = Keyword.get(config, :req_options, [])
+  def chat(config, messages, opts), do: Driver.chat(__MODULE__, :gemini, config, messages, opts)
+
+  @impl ElGraph.LLM
+  def stream_chat(config, messages, opts),
+    do: Driver.stream_chat(__MODULE__, :gemini, config, messages, opts)
+
+  ## Provider 매핑 — 진짜 가변인 것만 (스트림은 body가 아니라 URL이 바뀐다)
+
+  @impl ElGraph.LLM.Provider
+  def request_spec(config, messages, opts, mode) do
     model = Keyword.get(config, :model, @default_model)
-
-    ElGraph.LLM.Telemetry.instrument(:gemini, model, fn ->
-      case Req.post(
-             request.url,
-             [json: request.body, headers: request.headers, retry: false] ++ req_options
-           ) do
-        {:ok, %Req.Response{status: 200, body: body}} -> parse_response(body)
-        {:ok, %Req.Response{status: status, body: body}} -> {:error, {:api_error, status, body}}
-        {:error, exception} -> {:error, {:transport_error, exception}}
-      end
-    end)
-  end
-
-  @doc false
-  def build_request(config, messages, opts) do
     {system_messages, conversation} = Enum.split_with(messages, &(&1.role == :system))
 
     system_parts =
@@ -47,16 +42,18 @@ defmodule ElGraph.LLM.Gemini do
       |> put_present(:systemInstruction, if(system_parts != [], do: %{parts: system_parts}))
       |> put_present(:tools, encode_tools(Keyword.get(opts, :tools)))
 
-    model = Keyword.get(config, :model, @default_model)
-
     %{
-      url: "#{@base_url}/#{model}:generateContent",
+      url: "#{@base_url}/#{model}:#{endpoint(mode)}",
       headers: [{"x-goog-api-key", Keyword.fetch!(config, :api_key)}],
-      body: body
+      body: body,
+      model: model
     }
   end
 
-  @doc false
+  defp endpoint(:stream), do: "streamGenerateContent?alt=sse"
+  defp endpoint(:chat), do: "generateContent"
+
+  @impl ElGraph.LLM.Provider
   def parse_response(%{"candidates" => [%{"content" => %{"parts" => parts}} | _rest]} = body) do
     text =
       parts
@@ -83,123 +80,41 @@ defmodule ElGraph.LLM.Gemini do
 
   def parse_response(other), do: {:error, {:unexpected_response, other}}
 
-  ## 스트리밍 (SSE)
+  ## 스트림 청크 디코딩 (delta + usage)
 
-  @impl ElGraph.LLM
-  def stream_chat(config, messages, opts) do
-    on_delta = Keyword.get(opts, :on_delta, fn _ -> :ok end)
-    request = build_request(config, messages, opts)
-    model = Keyword.get(config, :model, @default_model)
-    url = "#{@base_url}/#{model}:streamGenerateContent?alt=sse"
-    req_options = Keyword.get(config, :req_options, [])
+  # Gemini는 functionCall을 한 청크에 완결로 보내므로 무상태다 — start/delta/end를 합성해
+  # 다른 어댑터와 동일한 delta 문법으로 노출한다(id=툴 이름, parse_response/1과 일관).
+  @impl ElGraph.LLM.Provider
+  def init_stream_state, do: %{}
 
-    ElGraph.LLM.Telemetry.instrument(:gemini, model, fn ->
-      collector = stream_collector(on_delta)
-
-      result =
-        Req.post(
-          url,
-          [json: request.body, headers: request.headers, retry: false, into: collector] ++
-            req_options
-        )
-
-      case result do
-        {:ok, %Req.Response{status: 200, private: %{el_graph_sse: %{chunks: chunks}}}} ->
-          reduce_chunks(chunks)
-
-        {:ok, %Req.Response{status: status, body: body}} ->
-          {:error, {:api_error, status, body}}
-
-        {:error, exception} ->
-          {:error, {:transport_error, exception}}
-      end
-    end)
+  @impl ElGraph.LLM.Provider
+  def decode_deltas(%{"candidates" => [%{"content" => %{"parts" => parts}} | _]}, state) do
+    {Enum.flat_map(parts, &part_deltas/1), state}
   end
 
-  # Req `into:` 콜렉터 — SSE 청크를 파싱하고 델타를 실시간 방출, 원청크는 누적한다.
-  defp stream_collector(on_delta) do
-    fn {:data, data}, {req, resp} ->
-      state =
-        resp.private[:el_graph_sse] || %{buffer: "", chunks: [], stream_acc: new_stream_acc()}
+  def decode_deltas(_chunk, state), do: {[], state}
 
-      {payloads, buffer} = ElGraph.LLM.SSE.parse(state.buffer, data)
-      decoded = Enum.map(payloads, &JSON.decode!/1)
-      stream_acc = Enum.reduce(decoded, state.stream_acc, &stream_step(&1, &2, on_delta))
-      state = %{buffer: buffer, chunks: state.chunks ++ decoded, stream_acc: stream_acc}
-      {:cont, {req, Req.Response.put_private(resp, :el_graph_sse, state)}}
-    end
-  end
+  defp part_deltas(%{"text" => text}) when is_binary(text) and text != "", do: [{:token, text}]
 
-  @doc false
-  @spec new_stream_acc() :: map()
-  def new_stream_acc, do: %{}
-
-  # Gemini는 functionCall을 한 청크에 완결로 보낸다 — 증분 args가 없으므로 start/delta/end를
-  # 합성해 다른 어댑터와 동일한 델타 어휘로 노출한다(id=툴 이름, parse_response/1과 일관).
-  @doc false
-  @spec stream_step(map(), map(), (ElGraph.LLM.delta() -> any())) :: map()
-  def stream_step(%{"candidates" => [%{"content" => %{"parts" => parts}} | _]}, acc, on_delta) do
-    Enum.each(parts, &emit_part(&1, on_delta))
-    acc
-  end
-
-  def stream_step(_chunk, acc, _on_delta), do: acc
-
-  defp emit_part(%{"text" => text}, on_delta) when is_binary(text) and text != "",
-    do: on_delta.({:token, text})
-
-  defp emit_part(%{"functionCall" => call}, on_delta) do
+  defp part_deltas(%{"functionCall" => call}) do
     name = call["name"]
-    on_delta.({:tool_call_start, name, name})
-    on_delta.({:tool_call_delta, name, JSON.encode!(call["args"] || %{})})
-    on_delta.({:tool_call_end, name})
+
+    [
+      {:tool_call_start, name, name},
+      {:tool_call_delta, name, JSON.encode!(call["args"] || %{})},
+      {:tool_call_end, name}
+    ]
   end
 
-  defp emit_part(_part, _on_delta), do: :ok
+  defp part_deltas(_part), do: []
 
-  @doc false
-  @spec decode_deltas(map()) :: [ElGraph.LLM.delta()]
-  def decode_deltas(%{"candidates" => [%{"content" => %{"parts" => parts}} | _]}) do
-    for %{"text" => text} <- parts, is_binary(text) and text != "", do: {:token, text}
-  end
+  @impl ElGraph.LLM.Provider
+  def decode_usage(%{
+        "usageMetadata" => %{"promptTokenCount" => input, "candidatesTokenCount" => output}
+      }),
+      do: %{input_tokens: input, output_tokens: output}
 
-  def decode_deltas(_chunk), do: []
-
-  @doc false
-  @spec reduce_chunks([map()]) :: {:ok, ElGraph.LLM.response()}
-  def reduce_chunks(chunks) do
-    acc = Enum.reduce(chunks, %{content: "", tool_calls: [], usage: nil}, &reduce_chunk/2)
-
-    content = if acc.content == "", do: nil, else: acc.content
-    {:ok, %{message: LLM.assistant(content, Enum.reverse(acc.tool_calls)), usage: acc.usage}}
-  end
-
-  defp reduce_chunk(chunk, acc) do
-    acc
-    |> accumulate_parts(get_in(chunk, ["candidates", Access.at(0), "content", "parts"]))
-    |> accumulate_usage(chunk["usageMetadata"])
-  end
-
-  defp accumulate_parts(acc, nil), do: acc
-
-  defp accumulate_parts(acc, parts) do
-    Enum.reduce(parts, acc, fn
-      %{"text" => text}, acc when is_binary(text) ->
-        %{acc | content: acc.content <> text}
-
-      %{"functionCall" => call}, acc ->
-        tc = %{id: call["name"], name: call["name"], args: call["args"] || %{}}
-        %{acc | tool_calls: [tc | acc.tool_calls]}
-
-      _part, acc ->
-        acc
-    end)
-  end
-
-  defp accumulate_usage(acc, %{"promptTokenCount" => input, "candidatesTokenCount" => output}),
-    do: %{acc | usage: %{input_tokens: input, output_tokens: output}}
-
-  defp accumulate_usage(acc, _missing), do: acc
+  def decode_usage(_chunk), do: nil
 
   ## 메시지 변환
 

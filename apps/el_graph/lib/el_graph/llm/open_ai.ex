@@ -1,38 +1,34 @@
 defmodule ElGraph.LLM.OpenAI do
   @moduledoc """
-  OpenAI Chat Completions API 어댑터 (`chat/3` 비스트리밍 + `stream_chat/3` SSE 스트리밍).
+  OpenAI Chat Completions API 어댑터. 전송·SSE·fold·usage·telemetry는 `ElGraph.LLM.Driver`가
+  맡고, 이 모듈은 OpenAI 고유의 요청 형태·응답 파싱·청크 디코딩만 공급한다.
 
   config: `:api_key`(필수), `:model`(기본 gpt-4o), `:req_options`.
-  `stream_chat/3`은 `opts[:on_delta]`로 토큰을 실시간 방출하고 완료 시 `chat/3`과 동일한
-  누적 응답을 반환한다. 어댑터는 자체 재시도를 하지 않는다 — 노드 `retry:` 정책이 담당한다.
+  어댑터는 자체 재시도를 하지 않는다 — 노드 `retry:` 정책이 담당한다.
   """
 
   @behaviour ElGraph.LLM
+  @behaviour ElGraph.LLM.Provider
 
   alias ElGraph.LLM
+  alias ElGraph.LLM.Driver
 
   @url "https://api.openai.com/v1/chat/completions"
   @default_model "gpt-4o"
 
   @impl ElGraph.LLM
-  def chat(config, messages, opts) do
-    request = build_request(config, messages, opts)
-    req_options = Keyword.get(config, :req_options, [])
+  def chat(config, messages, opts), do: Driver.chat(__MODULE__, :openai, config, messages, opts)
 
-    ElGraph.LLM.Telemetry.instrument(:openai, request.body.model, fn ->
-      case Req.post(
-             request.url,
-             [json: request.body, headers: request.headers, retry: false] ++ req_options
-           ) do
-        {:ok, %Req.Response{status: 200, body: body}} -> parse_response(body)
-        {:ok, %Req.Response{status: status, body: body}} -> {:error, {:api_error, status, body}}
-        {:error, exception} -> {:error, {:transport_error, exception}}
-      end
-    end)
-  end
+  @impl ElGraph.LLM
+  def stream_chat(config, messages, opts),
+    do: Driver.stream_chat(__MODULE__, :openai, config, messages, opts)
 
-  @doc false
-  def build_request(config, messages, opts) do
+  ## Provider 매핑 — 진짜 가변인 것만
+
+  @impl ElGraph.LLM.Provider
+  def request_spec(config, messages, opts, mode) do
+    model = Keyword.get(config, :model, @default_model)
+
     system_messages =
       case Keyword.get(opts, :system) do
         nil -> []
@@ -40,20 +36,24 @@ defmodule ElGraph.LLM.OpenAI do
       end
 
     body =
-      %{
-        model: Keyword.get(config, :model, @default_model),
-        messages: system_messages ++ Enum.map(messages, &encode_message/1)
-      }
+      %{model: model, messages: system_messages ++ Enum.map(messages, &encode_message/1)}
       |> put_present(:tools, encode_tools(Keyword.get(opts, :tools)))
+      |> stream_body(mode)
 
     %{
       url: @url,
       headers: [{"authorization", "Bearer #{Keyword.fetch!(config, :api_key)}"}],
-      body: body
+      body: body,
+      model: model
     }
   end
 
-  @doc false
+  defp stream_body(body, :stream),
+    do: body |> Map.put(:stream, true) |> Map.put(:stream_options, %{include_usage: true})
+
+  defp stream_body(body, :chat), do: body
+
+  @impl ElGraph.LLM.Provider
   def parse_response(%{"choices" => [%{"message" => message} | _rest]} = body) do
     tool_calls =
       for call <- message["tool_calls"] || [] do
@@ -78,175 +78,66 @@ defmodule ElGraph.LLM.OpenAI do
 
   def parse_response(other), do: {:error, {:unexpected_response, other}}
 
-  ## 스트리밍 (SSE)
+  ## 스트림 청크 디코딩 (delta + usage)
 
-  @impl ElGraph.LLM
-  def stream_chat(config, messages, opts) do
-    on_delta = Keyword.get(opts, :on_delta, fn _ -> :ok end)
-    request = build_request(config, messages, opts)
+  @impl ElGraph.LLM.Provider
+  def init_stream_state, do: %{tool_index_to_id: %{}}
 
-    body =
-      request.body
-      |> Map.put(:stream, true)
-      |> Map.put(:stream_options, %{include_usage: true})
+  # 한 청크에서 토큰·tool-call delta·완료(end)를 순서대로 디코딩한다. tool-call 인자 조각은
+  # index만 싣고 id는 첫 청크에만 오므로 index→id 상태를 청크 간에 잇는다.
+  @impl ElGraph.LLM.Provider
+  def decode_deltas(%{"choices" => [%{"delta" => delta} = choice | _]}, state) do
+    {tool_deltas, state} =
+      Enum.reduce(delta["tool_calls"] || [], {[], state}, fn call, {acc, st} ->
+        {more, st} = tool_call_deltas(call, st)
+        {acc ++ more, st}
+      end)
 
-    req_options = Keyword.get(config, :req_options, [])
-
-    ElGraph.LLM.Telemetry.instrument(:openai, body.model, fn ->
-      collector = stream_collector(on_delta)
-
-      result =
-        Req.post(
-          request.url,
-          [json: body, headers: request.headers, retry: false, into: collector] ++ req_options
-        )
-
-      case result do
-        {:ok, %Req.Response{status: 200, private: %{el_graph_sse: %{chunks: chunks}}}} ->
-          reduce_chunks(chunks)
-
-        {:ok, %Req.Response{status: status, body: body}} ->
-          {:error, {:api_error, status, body}}
-
-        {:error, exception} ->
-          {:error, {:transport_error, exception}}
-      end
-    end)
+    deltas = token_deltas(delta["content"]) ++ tool_deltas ++ finish_deltas(choice, state)
+    {deltas, state}
   end
 
-  # Req `into:` 콜렉터 — SSE 청크를 파싱하고 델타를 실시간 방출, 원청크는 누적한다.
-  # 증분 tool-call 방출을 위해 인덱스→id 상태(`stream_acc`)를 청크 간에 잇는다.
-  defp stream_collector(on_delta) do
-    fn {:data, data}, {req, resp} ->
-      state =
-        resp.private[:el_graph_sse] || %{buffer: "", chunks: [], stream_acc: new_stream_acc()}
+  def decode_deltas(_chunk, state), do: {[], state}
 
-      {payloads, buffer} = ElGraph.LLM.SSE.parse(state.buffer, data)
-      decoded = Enum.map(payloads, &JSON.decode!/1)
-      stream_acc = Enum.reduce(decoded, state.stream_acc, &stream_step(&1, &2, on_delta))
-      state = %{buffer: buffer, chunks: state.chunks ++ decoded, stream_acc: stream_acc}
-      {:cont, {req, Req.Response.put_private(resp, :el_graph_sse, state)}}
-    end
-  end
+  defp token_deltas(content) when is_binary(content) and content != "", do: [{:token, content}]
+  defp token_deltas(_content), do: []
 
-  @doc false
-  @spec new_stream_acc() :: map()
-  def new_stream_acc, do: %{tool_index_to_id: %{}}
-
-  @doc false
-  @spec stream_step(map(), map(), (ElGraph.LLM.delta() -> any())) :: map()
-  def stream_step(%{"choices" => [%{"delta" => delta} = choice | _]} = _chunk, acc, on_delta) do
-    emit_token(delta["content"], on_delta)
-    acc = Enum.reduce(delta["tool_calls"] || [], acc, &stream_tool_call(&1, &2, on_delta))
-    maybe_finish_tool_calls(choice["finish_reason"], acc, on_delta)
-  end
-
-  def stream_step(_chunk, acc, _on_delta), do: acc
-
-  defp emit_token(content, on_delta) when is_binary(content) and content != "",
-    do: on_delta.({:token, content})
-
-  defp emit_token(_content, _on_delta), do: :ok
-
-  defp stream_tool_call(%{"index" => index, "id" => id} = call, acc, on_delta)
-       when is_binary(id) do
-    acc =
-      if Map.has_key?(acc.tool_index_to_id, index) do
-        # 같은 index가 이미 시작됨 → 재방출하지 않음.
-        acc
+  defp tool_call_deltas(%{"index" => index, "id" => id} = call, state) when is_binary(id) do
+    {start, state} =
+      if Map.has_key?(state.tool_index_to_id, index) do
+        {[], state}
       else
-        on_delta.({:tool_call_start, id, call["function"]["name"]})
-        put_in(acc.tool_index_to_id[index], id)
+        {[{:tool_call_start, id, call["function"]["name"]}],
+         put_in(state.tool_index_to_id[index], id)}
       end
 
-    emit_args_fragment(call, index, acc, on_delta)
-    acc
+    {start ++ arg_deltas(call, index, state), state}
   end
 
-  defp stream_tool_call(%{"index" => index} = call, acc, on_delta) do
-    emit_args_fragment(call, index, acc, on_delta)
-    acc
+  defp tool_call_deltas(%{"index" => index} = call, state) do
+    {arg_deltas(call, index, state), state}
   end
 
-  defp emit_args_fragment(call, index, acc, on_delta) do
+  defp arg_deltas(call, index, state) do
     case call["function"]["arguments"] do
       frag when is_binary(frag) and frag != "" ->
-        on_delta.({:tool_call_delta, acc.tool_index_to_id[index], frag})
+        [{:tool_call_delta, state.tool_index_to_id[index], frag}]
 
       _empty ->
-        :ok
+        []
     end
-
-    acc
   end
 
-  defp maybe_finish_tool_calls("tool_calls", acc, on_delta) do
-    for {_index, id} <- acc.tool_index_to_id, do: on_delta.({:tool_call_end, id})
-    acc
-  end
+  defp finish_deltas(%{"finish_reason" => "tool_calls"}, state),
+    do: for({_index, id} <- state.tool_index_to_id, do: {:tool_call_end, id})
 
-  defp maybe_finish_tool_calls(_reason, acc, _on_delta), do: acc
+  defp finish_deltas(_choice, _state), do: []
 
-  @doc false
-  @spec decode_deltas(map()) :: [ElGraph.LLM.delta()]
-  def decode_deltas(%{"choices" => [%{"delta" => %{"content" => content}} | _]})
-      when is_binary(content) and content != "",
-      do: [{:token, content}]
+  @impl ElGraph.LLM.Provider
+  def decode_usage(%{"usage" => %{"prompt_tokens" => input, "completion_tokens" => output}}),
+    do: %{input_tokens: input, output_tokens: output}
 
-  def decode_deltas(_chunk), do: []
-
-  @doc false
-  @spec reduce_chunks([map()]) :: {:ok, ElGraph.LLM.response()}
-  def reduce_chunks(chunks) do
-    acc = Enum.reduce(chunks, %{content: "", tools: %{}, usage: nil}, &reduce_chunk/2)
-
-    tool_calls =
-      acc.tools
-      |> Enum.sort_by(fn {index, _} -> index end)
-      |> Enum.map(fn {_index, tc} ->
-        %{id: tc.id, name: tc.name, args: JSON.decode!(tc.args)}
-      end)
-
-    content = if acc.content == "", do: nil, else: acc.content
-    {:ok, %{message: LLM.assistant(content, tool_calls), usage: acc.usage}}
-  end
-
-  defp reduce_chunk(
-         %{"usage" => %{"prompt_tokens" => input, "completion_tokens" => output}},
-         acc
-       ),
-       do: %{acc | usage: %{input_tokens: input, output_tokens: output}}
-
-  defp reduce_chunk(%{"choices" => [%{"delta" => delta} | _]}, acc) do
-    acc
-    |> accumulate_content(delta["content"])
-    |> accumulate_tool_calls(delta["tool_calls"])
-  end
-
-  defp reduce_chunk(_chunk, acc), do: acc
-
-  defp accumulate_content(acc, nil), do: acc
-  defp accumulate_content(acc, text), do: %{acc | content: acc.content <> text}
-
-  defp accumulate_tool_calls(acc, nil), do: acc
-
-  defp accumulate_tool_calls(acc, calls) do
-    tools =
-      Enum.reduce(calls, acc.tools, fn call, tools ->
-        index = call["index"]
-        existing = Map.get(tools, index, %{id: nil, name: nil, args: ""})
-
-        updated = %{
-          id: call["id"] || existing.id,
-          name: call["function"]["name"] || existing.name,
-          args: existing.args <> (call["function"]["arguments"] || "")
-        }
-
-        Map.put(tools, index, updated)
-      end)
-
-    %{acc | tools: tools}
-  end
+  def decode_usage(_chunk), do: nil
 
   ## 메시지 변환
 

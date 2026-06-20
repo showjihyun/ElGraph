@@ -4,7 +4,7 @@ defmodule ElGraph.LLM.AnthropicTest do
   alias ElGraph.LLM
   alias ElGraph.LLM.Anthropic
 
-  describe "build_request/3" do
+  describe "request_spec/4" do
     test "converts a full conversation with tools" do
       messages = [
         %{role: :system, content: "넌 검색 봇"},
@@ -14,7 +14,7 @@ defmodule ElGraph.LLM.AnthropicTest do
       ]
 
       tools = [%{name: "web_search", description: "검색", input_schema: %{"type" => "object"}}]
-      request = Anthropic.build_request([api_key: "test-key"], messages, tools: tools)
+      request = Anthropic.request_spec([api_key: "test-key"], messages, [tools: tools], :chat)
 
       assert request.url =~ "api.anthropic.com"
       assert {"x-api-key", "test-key"} in request.headers
@@ -45,10 +45,11 @@ defmodule ElGraph.LLM.AnthropicTest do
 
     test "honors config model/max_tokens and the :system option" do
       request =
-        Anthropic.build_request(
+        Anthropic.request_spec(
           [api_key: "k", model: "claude-opus-4-8", max_tokens: 100],
           [LLM.user("x")],
-          system: "시스템"
+          [system: "시스템"],
+          :chat
         )
 
       assert %{model: "claude-opus-4-8", max_tokens: 100, system: "시스템"} = request.body
