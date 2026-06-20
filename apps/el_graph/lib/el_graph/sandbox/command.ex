@@ -26,49 +26,13 @@ defmodule ElGraph.Sandbox.Command do
 
   @behaviour ElGraph.Sandbox
 
-  @interpreters %{
-    "elixir" => {"elixir", "-e"},
-    "python" => {"python", "-c"},
-    "node" => {"node", "-e"},
-    "ruby" => {"ruby", "-e"},
-    "bash" => {"bash", "-c"}
-  }
+  alias ElGraph.Sandbox
 
+  # 인터프리터를 직접 실행할 뿐 — 언어 lookup·실행·result 매핑은 Sandbox 공용 헬퍼가 맡는다.
   @impl ElGraph.Sandbox
   def run(code, opts \\ []) when is_binary(code) do
-    language = opts[:language] || "elixir"
-
-    case Map.fetch(@interpreters, language) do
-      {:ok, {cmd, flag}} -> exec(cmd, [flag, code], opts)
-      :error -> {:error, {:unsupported_language, language}}
+    with {:ok, {cmd, flag}} <- Sandbox.interpreter(opts[:language] || "elixir") do
+      Sandbox.exec(cmd, [flag, code], opts)
     end
   end
-
-  defp exec(cmd, args, opts) do
-    runner = opts[:runner] || (&default_runner/3)
-
-    case ElGraph.Sandbox.run_with_timeout(runner, cmd, args, opts) do
-      {:ok, {output, 0}} -> {:ok, build_result(output, 0, opts)}
-      {:ok, {output, code}} -> {:error, {:exit, code, output}}
-      {:error, :timeout} -> {:error, :timeout}
-    end
-  end
-
-  defp build_result(output, code, opts) do
-    case opts[:max_output] do
-      nil ->
-        %{stdout: output, exit_code: code, truncated: false}
-
-      :infinity ->
-        %{stdout: output, exit_code: code, truncated: false}
-
-      max when byte_size(output) > max ->
-        %{stdout: binary_part(output, 0, max), exit_code: code, truncated: true}
-
-      _max ->
-        %{stdout: output, exit_code: code, truncated: false}
-    end
-  end
-
-  defp default_runner(cmd, args, opts), do: System.cmd(cmd, args, opts)
 end
