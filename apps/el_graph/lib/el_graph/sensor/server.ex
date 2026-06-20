@@ -24,9 +24,10 @@ defmodule ElGraph.Sensor.Server do
 
   @impl GenServer
   def handle_info(:poll, state) do
-    state = do_poll(state)
+    # 다음 폴은 poll 작업 전에 예약한다 — 작업 후 예약하면 실제 주기가
+    # interval + poll소요로 누적 드리프트한다. 시작 시점 기준이면 고정주기다.
     schedule(state.interval)
-    {:noreply, state}
+    {:noreply, do_poll(state)}
   end
 
   @impl GenServer
