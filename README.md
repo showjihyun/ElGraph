@@ -2,7 +2,11 @@
 
 [한국어](README.ko.md) | **English**
 
-[![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2Fshowjihyun%2FElGraph%2Fmain%2Fnotebooks%2Fgetting_started.livemd)
+[![Hex.pm](https://img.shields.io/hexpm/v/el_graph.svg)](https://hex.pm/packages/el_graph)
+[![Hexdocs](https://img.shields.io/badge/hex-docs-lightgreen.svg)](https://hexdocs.pm/el_graph)
+[![CI](https://github.com/showjihyun/ElGraph/actions/workflows/ci.yml/badge.svg)](https://github.com/showjihyun/ElGraph/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2Fshowjihyun%2FElGraph%2Fmain%2Fnotebooks%2Fgetting_started.en.livemd)
 
 > **A graph-first agent framework running on the BEAM (Elixir/OTP).**
 > Delivers LangGraph-style durable execution, human-in-the-loop, and checkpointing
@@ -82,15 +86,13 @@ elixir --version    # Elixir 1.18 or newer is fine
 ```elixir
 def deps do
   [
-    # Before the Hex release — from the git subdirectory:
-    {:el_graph, github: "showjihyun/ElGraph", sparse: "apps/el_graph"}
-    # After the Hex release:
-    # {:el_graph, "~> 0.3"}
+    {:el_graph, "~> 0.3"}
   ]
 end
 ```
 
-> Both git and Hex are public, so **installing needs no auth** — `mix hex.user auth` is a publisher-only step.
+> Want the latest unreleased changes? Use the git subdirectory instead:
+> `{:el_graph, github: "showjihyun/ElGraph", sparse: "apps/el_graph"}`. Both are public — **installing needs no auth** (`mix hex.user auth` is a publisher-only step).
 
 The core `el_graph` alone is a headless (server-less) agent runtime. The durable checkpointers
 (Postgres/Redis), the observability UI (ElTrace), and the A2A/AG-UI HTTP server are separate

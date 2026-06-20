@@ -2,7 +2,7 @@
 
 ```elixir
 Mix.install([
-  {:el_graph, github: "showjihyun/ElGraph", sparse: "apps/el_graph"}
+  {:el_graph, "~> 0.3"}
 ])
 ```
 
