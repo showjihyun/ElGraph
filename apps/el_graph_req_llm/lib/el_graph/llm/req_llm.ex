@@ -17,7 +17,20 @@ defmodule ElGraph.LLM.ReqLLM do
 
   툴 실행은 ElGraph(Action 머신)가 담당하므로 ReqLLM tool의 `:callback`은 no-op이다 —
   어댑터는 모델에 tool 스펙을 보내고 돌아온 tool_calls를 ElGraph 메시지로 옮기기만 한다.
-  비스트리밍(`chat/3`)만 구현한다.
+
+  ## 스트리밍 (비지원 — 명시적 폴백)
+
+  이 어댑터는 **비스트리밍 `chat/3`만 구현한다**. 선택 콜백 `stream_chat/3`은 구현하지 않으므로
+  `ElGraph.LLM.stream_supported?/1`이 이 어댑터에 대해 `false`를 돌려준다. 스트리밍이 필요한 노드는
+  반드시 먼저 `stream_supported?/1`로 확인하고, 미지원이면 `chat/3`(전체 응답을 한 번에 반환)으로
+  폴백한다 — `mod.stream_chat/3`을 무조건 호출하면 `UndefinedFunctionError`가 난다.
+
+      {:ok, %{message: msg}} =
+        if ElGraph.LLM.stream_supported?(llm),
+          do: ElGraph.LLM.stream_to_ctx(llm, messages, opts, ctx),
+          else: apply(elem(llm, 0), :chat, [elem(llm, 1), messages, opts])
+
+  토큰 단위 네이티브 SSE 스트리밍이 필요하면 `ElGraph.LLM.{OpenAI, Anthropic, Gemini}` 어댑터를 쓴다.
   """
 
   @behaviour ElGraph.LLM

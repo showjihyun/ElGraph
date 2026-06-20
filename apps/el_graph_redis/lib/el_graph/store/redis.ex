@@ -15,7 +15,8 @@ defmodule ElGraph.Store.Redis do
     * `<p>:ns:<namespace>` → namespace당 HASH (field=key, value=`term_to_binary(value)`)
 
   `list/2`는 HGETALL로 namespace 전체를 한 번에 돌려준다 — 별도 인덱스가 필요 없다.
-  값은 `:erlang.term_to_binary/1`로 직렬화한다(RESP는 바이너리 안전).
+  값은 `:erlang.term_to_binary/1`로 직렬화한다(RESP는 바이너리 안전). 역직렬화는
+  `binary_to_term/2`를 `[:safe]`로 호출해 변조 시 새 atom/함수 생성을 막는다.
   """
 
   @behaviour ElGraph.Store
@@ -42,7 +43,7 @@ defmodule ElGraph.Store.Redis do
   def get(%{conn: conn, prefix: p}, namespace, key) do
     case Redix.command(conn, ["HGET", ns_key(p, namespace), key]) do
       {:ok, nil} -> :not_found
-      {:ok, data} -> {:ok, :erlang.binary_to_term(data)}
+      {:ok, data} -> {:ok, :erlang.binary_to_term(data, [:safe])}
     end
   end
 
@@ -58,7 +59,7 @@ defmodule ElGraph.Store.Redis do
 
     flat
     |> Enum.chunk_every(2)
-    |> Enum.map(fn [key, data] -> {key, :erlang.binary_to_term(data)} end)
+    |> Enum.map(fn [key, data] -> {key, :erlang.binary_to_term(data, [:safe])} end)
   end
 
   defp ns_key(p, namespace), do: "#{p}:ns:#{Enum.join(namespace, ":")}"

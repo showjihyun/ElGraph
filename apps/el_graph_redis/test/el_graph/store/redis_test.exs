@@ -30,6 +30,18 @@ defmodule ElGraph.Store.RedisTest do
     end
   end
 
+  describe "safe deserialization (보안 — :safe)" do
+    test "직접 심은 unsafe 값(미등록 atom)은 :safe로 거부된다", %{config: config} do
+      name = "elgraph_unknown_atom_#{System.unique_integer([:positive])}"
+      evil = <<131, 119, byte_size(name)::8, name::binary>>
+
+      {:ok, _} =
+        Redix.command(:el_graph_test_redix, ["HSET", "#{config.prefix}:ns:evil", "k", evil])
+
+      assert_raise ArgumentError, fn -> Redis.get(config, ["evil"], "k") end
+    end
+  end
+
   describe "ElGraph.Memory persisted to Valkey" do
     test "facts (incl. temporal/conflict) survive a fresh Store handle", %{config: config} do
       mem = ElGraph.Memory.new({Redis, config})

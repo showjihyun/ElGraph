@@ -5,7 +5,9 @@ defmodule ElGraphWeb.EndpointTest do
   alias ElGraphWeb.Endpoint
   alias ElGraphWeb.TestAgent
 
-  defp call(conn), do: Endpoint.call(conn, Endpoint.init(agents: TestAgent.registry()))
+  # 라우팅 포워딩을 검증하는 테스트 — fail-closed 기본값을 명시적으로 끈다(:public).
+  defp call(conn),
+    do: Endpoint.call(conn, Endpoint.init(agents: TestAgent.registry(), api_keys: :public))
 
   test "injects agents and forwards /a2a to the A2A router" do
     conn = call(conn(:get, "/a2a/echo/agent-card"))

@@ -29,9 +29,10 @@ defmodule ElGraphWeb do
 
   옵션:
 
-    * `:api_keys`   — 허용 API 키 문자열 목록(기본 `[]`). 비어 있으면 인증 비활성(오픈).
+    * `:api_keys`   — 허용 API 키 문자열 목록(기본 `[]` = **fail-closed**, 모든 요청 401).
       비어 있지 않으면 모든 요청에 `authorization: "Bearer <key>"` 또는 `x-api-key: <key>`
-      헤더가 필요하다(`ElGraphWeb.Auth`).
+      헤더가 필요하다(`ElGraphWeb.Auth`). 인증을 의도적으로 끄려면 `api_keys: :public`을
+      명시한다 — 개방은 항상 명시적 opt-in이다.
     * `:guardrails` — 입력 가드 목록(`ElGraph.Guardrail` 가드, 기본 `[]`). 비어 있지 않으면
       들어오는 메시지 텍스트를 그래프 invoke 전에 검사한다 — 차단 시 JSON-RPC `-32602`
       또는 HTTP 403으로 응답하고 그래프를 호출하지 않는다(`ElGraphWeb.Guardrails`).

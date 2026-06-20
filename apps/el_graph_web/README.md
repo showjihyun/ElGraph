@@ -22,7 +22,7 @@ children = [
     agents: agents,
     task_store: MyApp.TaskStore,
     port: 4001,
-    api_keys: ["sk-..."],                                     # 비우면 인증 비활성(개방)
+    api_keys: ["sk-..."],                                     # 미설정/빈 목록 = fail-closed(401). 개방은 :public 명시
     guardrails: [ElGraph.Guardrail.deny_pii([:credit_card])]  # 입력 스크리닝(선택)
   )
 ]
@@ -35,7 +35,7 @@ children = [
 | `:agents` (필수) | `%{name => %{graph:, card:}}` 레지스트리 |
 | `:task_store` | A2A Task 저장소 ref (`message/send`/`tasks/get`용). 미지정 시 task 영속 안 함 |
 | `:port` | 기본 4001 |
-| `:api_keys` | 허용 키 목록. **비었으면 인증 비활성**, 있으면 `Authorization: Bearer <key>` 또는 `x-api-key` 요구(없으면 401) |
+| `:api_keys` | 허용 키 목록. **기본 fail-closed**: 미설정/빈 목록이면 모든 요청 401. 키가 있으면 `Authorization: Bearer <key>` 또는 `x-api-key` 요구(없으면 401). 인증을 끄려면 `:public` 명시 |
 | `:guardrails` | 입력 가드 목록(`ElGraph.Guardrail`). 차단 시 graph 미실행(JSON-RPC `-32602` / HTTP 403) |
 
 ## 엔드포인트
@@ -81,7 +81,7 @@ AG-UI 이벤트: `RUN_STARTED`/`RUN_FINISHED`/`RUN_ERROR`, `STEP_STARTED`/`STEP_
 
 ## 보안
 
-- **인증**: `:api_keys`가 있으면 Bearer/x-api-key 검사(없거나 틀리면 401). 비었으면 개방.
+- **인증(fail-closed)**: `:api_keys`가 있으면 Bearer/x-api-key 검사(없거나 틀리면 401). 미설정/빈 목록이면 모든 요청을 401로 막는다 — 키 누락 실수로 엔드포인트가 열리지 않는다. 인증을 의도적으로 끄려면 `api_keys: :public`을 명시한다.
 - **가드레일**: `:guardrails`로 들어오는 메시지 텍스트를 LLM 호출 전에 스크리닝 — 차단 시 그래프를
   실행하지 않는다. PII 마스킹/차단·구조화 검증 등은 `ElGraph.Guardrail` 참고.
 
