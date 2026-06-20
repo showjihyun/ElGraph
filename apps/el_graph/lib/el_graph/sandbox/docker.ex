@@ -31,13 +31,7 @@ defmodule ElGraph.Sandbox.Docker do
 
   @behaviour ElGraph.Sandbox
 
-  @interpreters %{
-    "elixir" => {"elixir", "-e"},
-    "python" => {"python", "-c"},
-    "node" => {"node", "-e"},
-    "ruby" => {"ruby", "-e"},
-    "bash" => {"bash", "-c"}
-  }
+  alias ElGraph.Sandbox
 
   @default_images %{
     "elixir" => "elixir:1.18-slim",
@@ -47,18 +41,15 @@ defmodule ElGraph.Sandbox.Docker do
     "bash" => "bash:5"
   }
 
+  # Docker 고유분만 — 안전 기본값을 강제하는 docker run argv 조립. 언어 lookup·실행·result
+  # 매핑은 Sandbox 공용 헬퍼가 맡는다.
   @impl ElGraph.Sandbox
   def run(code, opts \\ []) when is_binary(code) do
     language = opts[:language] || "elixir"
 
-    case Map.fetch(@interpreters, language) do
-      {:ok, {interpreter, flag}} ->
-        image = opts[:image] || Map.fetch!(@default_images, language)
-        args = docker_args(image, interpreter, flag, code, opts)
-        exec(args, opts)
-
-      :error ->
-        {:error, {:unsupported_language, language}}
+    with {:ok, {interpreter, flag}} <- Sandbox.interpreter(language) do
+      image = opts[:image] || Map.fetch!(@default_images, language)
+      Sandbox.exec("docker", docker_args(image, interpreter, flag, code, opts), opts)
     end
   end
 
@@ -76,32 +67,4 @@ defmodule ElGraph.Sandbox.Docker do
       code
     ]
   end
-
-  defp exec(args, opts) do
-    runner = opts[:runner] || (&default_runner/3)
-
-    case ElGraph.Sandbox.run_with_timeout(runner, "docker", args, opts) do
-      {:ok, {output, 0}} -> {:ok, build_result(output, 0, opts)}
-      {:ok, {output, code}} -> {:error, {:exit, code, output}}
-      {:error, :timeout} -> {:error, :timeout}
-    end
-  end
-
-  defp build_result(output, code, opts) do
-    case opts[:max_output] do
-      nil ->
-        %{stdout: output, exit_code: code, truncated: false}
-
-      :infinity ->
-        %{stdout: output, exit_code: code, truncated: false}
-
-      max when byte_size(output) > max ->
-        %{stdout: binary_part(output, 0, max), exit_code: code, truncated: true}
-
-      _max ->
-        %{stdout: output, exit_code: code, truncated: false}
-    end
-  end
-
-  defp default_runner(cmd, args, opts), do: System.cmd(cmd, args, opts)
 end

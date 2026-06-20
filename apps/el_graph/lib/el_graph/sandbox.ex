@@ -27,6 +27,58 @@ defmodule ElGraph.Sandbox do
 
   @callback run(code :: String.t(), opts :: keyword()) :: {:ok, result()} | {:error, term()}
 
+  # 어댑터 공용 인터프리터 테이블 — Command/Docker가 동일하게 쓴다.
+  @interpreters %{
+    "elixir" => {"elixir", "-e"},
+    "python" => {"python", "-c"},
+    "node" => {"node", "-e"},
+    "ruby" => {"ruby", "-e"},
+    "bash" => {"bash", "-c"}
+  }
+
+  @doc false
+  @spec interpreter(String.t()) ::
+          {:ok, {String.t(), String.t()}} | {:error, {:unsupported_language, String.t()}}
+  def interpreter(language) do
+    case Map.fetch(@interpreters, language) do
+      {:ok, cmd_flag} -> {:ok, cmd_flag}
+      :error -> {:error, {:unsupported_language, language}}
+    end
+  end
+
+  @doc false
+  # 어댑터 공용 실행. 러너(`:runner`, 기본 `System.cmd`)를 timeout 안에서 돌리고 결과를 중립
+  # result로 매핑한다: exit 0 = 성공(`:max_output` 적용), 그 외 = `{:error, {:exit, code, output}}`,
+  # timeout = `{:error, :timeout}`. Command/Docker가 cmd/args만 달리해 호출한다.
+  @spec exec(String.t(), [String.t()], keyword()) :: {:ok, result()} | {:error, term()}
+  def exec(cmd, args, opts) do
+    runner = opts[:runner] || (&default_runner/3)
+
+    case run_with_timeout(runner, cmd, args, opts) do
+      {:ok, {output, 0}} -> {:ok, build_result(output, 0, opts)}
+      {:ok, {output, code}} -> {:error, {:exit, code, output}}
+      {:error, :timeout} -> {:error, :timeout}
+    end
+  end
+
+  defp build_result(output, code, opts) do
+    case opts[:max_output] do
+      nil ->
+        %{stdout: output, exit_code: code, truncated: false}
+
+      :infinity ->
+        %{stdout: output, exit_code: code, truncated: false}
+
+      max when byte_size(output) > max ->
+        %{stdout: binary_part(output, 0, max), exit_code: code, truncated: true}
+
+      _max ->
+        %{stdout: output, exit_code: code, truncated: false}
+    end
+  end
+
+  defp default_runner(cmd, args, opts), do: System.cmd(cmd, args, opts)
+
   @doc false
   # 어댑터 공용 타임아웃 래퍼. 러너를 Task 안에서 실행하고, `:timeout`(ms, 기본 `:infinity`)을
   # 초과하면 `Task.shutdown(task, :brutal_kill)`로 정리한 뒤 `{:error, :timeout}`을 돌려준다.
