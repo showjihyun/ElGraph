@@ -724,17 +724,21 @@ defmodule ElGraph.Executor do
   defp next_entries(%Graph{} = graph, results, state) do
     results
     |> Enum.reduce_while({:ok, {MapSet.new(), []}}, fn {_key, node, _update, control},
-                                                       {:ok, {plain, sends}} ->
+                                                       {:ok, {plain, send_chunks}} ->
       case control_targets(graph, node, control, state) do
         {:ok, targets, new_sends} ->
-          {:cont, {:ok, {Enum.into(targets, plain), sends ++ new_sends}}}
+          # 청크를 prepend로 모은다 — `sends ++ new_sends`는 결과마다 누적 리스트를 복사해
+          # O(n²)가 된다. 마지막에 reverse + concat으로 원래 순서를 O(n)에 복원한다.
+          {:cont, {:ok, {Enum.into(targets, plain), [new_sends | send_chunks]}}}
 
         {:error, _reason} = error ->
           {:halt, error}
       end
     end)
     |> case do
-      {:ok, {plain, sends}} ->
+      {:ok, {plain, send_chunks}} ->
+        sends = send_chunks |> Enum.reverse() |> Enum.concat()
+
         plain_entries =
           plain
           |> MapSet.delete(:end)

@@ -31,6 +31,20 @@ defmodule ElGraph.SensorTest do
     def poll(_state), do: {:signal, %Signal{type: "interval.fired", data: %{}}, nil}
   end
 
+  defmodule DriftSensor do
+    use ElGraph.Sensor, interval: 40
+
+    @impl true
+    def poll(_state) do
+      at = System.monotonic_time(:millisecond)
+
+      # poll 작업을 시뮬레이션한다(작업 < interval). 고정주기면 cycle이 interval(40ms)에
+      # 고정되고, poll-끝 기준 스케줄(드리프트)이면 cycle ≈ interval + 작업이 된다.
+      Process.sleep(25)
+      {:signal, %Signal{type: "drift.tick", data: %{at: at}}, nil}
+    end
+  end
+
   defmodule PollRaisingSensor do
     use ElGraph.Sensor
 
@@ -99,6 +113,24 @@ defmodule ElGraph.SensorTest do
 
       assert_receive {:tick, %Signal{type: "interval.fired"}}, 500
       assert_receive {:tick, %Signal{type: "interval.fired"}}, 500
+    end
+
+    test "auto-poll keeps a fixed rate and does not drift by poll duration" do
+      parent = self()
+      start_supervised!({DriftSensor, on_signal: fn s -> send(parent, {:at, s.data.at}) end})
+
+      ats =
+        for _ <- 1..8 do
+          assert_receive {:at, at}, 1_000
+          at
+        end
+
+      deltas = ats |> Enum.chunk_every(2, 1, :discard) |> Enum.map(fn [a, b] -> b - a end)
+      median = deltas |> Enum.sort() |> Enum.at(div(length(deltas), 2))
+
+      # 고정주기: cycle ≈ interval(40ms). 드리프트(버그): cycle ≈ interval + 작업 ≈ 65ms.
+      # 둘 사이(55ms)로 가른다.
+      assert median < 55
     end
   end
 
