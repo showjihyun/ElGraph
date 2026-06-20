@@ -63,4 +63,54 @@ defmodule ElGraph.RateLimiterTest do
       assert :ok = Task.await(waiter)
     end
   end
+
+  describe "with_limit waiting contract (SPEC §5)" do
+    # 슬롯을 잡고 :held를 보낸 뒤 :release까지 점유를 유지하는 헬퍼.
+    defp hold_slot(limiter, test_pid) do
+      spawn(fn ->
+        :ok = RateLimiter.acquire(limiter)
+        send(test_pid, :held)
+
+        receive do
+          :release -> :ok
+        end
+      end)
+    end
+
+    test "with_limit waits indefinitely by default rather than timing out" do
+      limiter = start_supervised!({RateLimiter, limit: 1})
+      holder = hold_slot(limiter, self())
+      assert_receive :held
+
+      # 기본 with_limit는 슬롯이 빌 때까지 대기해야 한다 (5초 데드라인 없음).
+      waiter = Task.async(fn -> RateLimiter.with_limit(limiter, fn -> :did_work end) end)
+      refute Task.yield(waiter, 100)
+
+      send(holder, :release)
+      assert :did_work = Task.await(waiter, 1_000)
+    end
+
+    test "with_limit honors an explicit :timeout and fails loudly when no slot opens" do
+      limiter = start_supervised!({RateLimiter, limit: 1})
+      test_pid = self()
+      holder = hold_slot(limiter, test_pid)
+      assert_receive :held
+
+      # 명시적 데드라인을 주면 슬롯을 못 잡았을 때 조용히가 아니라 시끄럽게 실패한다.
+      waiter =
+        Task.async(fn ->
+          try do
+            RateLimiter.with_limit(limiter, fn -> send(test_pid, :ran) end, timeout: 50)
+          catch
+            :exit, _ -> :timed_out
+          end
+        end)
+
+      assert :timed_out = Task.await(waiter, 1_000)
+      # 슬롯을 못 잡았으므로 함수 본문은 실행되지 않아야 한다.
+      refute_received :ran
+
+      send(holder, :release)
+    end
+  end
 end

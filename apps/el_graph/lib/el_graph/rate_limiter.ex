@@ -17,9 +17,15 @@ defmodule ElGraph.RateLimiter do
     GenServer.start_link(__MODULE__, limit, Keyword.take(opts, [:name]))
   end
 
-  @doc "슬롯을 획득한다. 빈 슬롯이 없으면 대기한다."
+  @doc """
+  슬롯을 획득한다. 빈 슬롯이 없으면 대기한다.
+
+  기본 `timeout`은 `:infinity` — 세마포어의 계약("빈 슬롯이 없으면 대기")을 따른다.
+  LLM 호출처럼 슬롯 보유가 길어질 수 있는 워크로드에서 유한 타임아웃은 대기자를
+  exit시켜 도리어 부하 상황을 깨뜨리므로, 데드라인이 필요할 때만 명시적으로 준다.
+  """
   @spec acquire(GenServer.server(), timeout()) :: :ok
-  def acquire(server, timeout \\ 5_000) do
+  def acquire(server, timeout \\ :infinity) do
     GenServer.call(server, :acquire, timeout)
   end
 
@@ -29,10 +35,15 @@ defmodule ElGraph.RateLimiter do
     GenServer.cast(server, {:release, self()})
   end
 
-  @doc "슬롯 안에서 함수를 실행한다. 예외가 나도 슬롯은 반환된다."
-  @spec with_limit(GenServer.server(), (-> result)) :: result when result: term()
-  def with_limit(server, fun) do
-    :ok = acquire(server)
+  @doc """
+  슬롯 안에서 함수를 실행한다. 예외가 나도 슬롯은 반환된다.
+
+  `:timeout`(기본 `:infinity`)로 슬롯 획득 데드라인을 준다. 데드라인을 넘기면
+  `acquire/2`가 exit하므로(조용히 통과하지 않음) `fun`은 실행되지 않는다.
+  """
+  @spec with_limit(GenServer.server(), (-> result), keyword()) :: result when result: term()
+  def with_limit(server, fun, opts \\ []) do
+    :ok = acquire(server, Keyword.get(opts, :timeout, :infinity))
 
     try do
       fun.()
