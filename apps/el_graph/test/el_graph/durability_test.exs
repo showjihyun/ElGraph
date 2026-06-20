@@ -1,7 +1,25 @@
+defmodule ElGraph.DurabilityTest.FailingCheckpointer do
+  @moduledoc false
+  # 모든 쓰기가 실패하는 체크포인터 — :async writer의 오류 처리 검증용.
+  @behaviour ElGraph.Checkpointer
+
+  @impl true
+  def put(_config, _checkpoint), do: {:error, :disk_full}
+  @impl true
+  def get(_config, _thread_id, _step), do: :not_found
+  @impl true
+  def put_writes(_config, _thread_id, _step, _writes), do: {:error, :disk_full}
+  @impl true
+  def get_writes(_config, _thread_id, _step), do: []
+  @impl true
+  def list(_config, _thread_id), do: []
+end
+
 defmodule ElGraph.DurabilityTest do
   use ExUnit.Case, async: true
 
   alias ElGraph.Checkpointer.ETS
+  alias ElGraph.DurabilityTest.FailingCheckpointer
   alias ElGraph.{Checkpoint, TestNodes}
 
   # a → b → c : superstep마다 체크포인트가 찍히는 선형 그래프 (sync면 step 0..3 = 4개).
@@ -104,6 +122,20 @@ defmodule ElGraph.DurabilityTest do
 
       assert {:ok, %{result: "Bob"}} =
                ElGraph.resume(ask_graph(), checkpointer: cp, thread_id: "t", resume: "Bob")
+    end
+
+    test "쓰기 실패를 조용히 삼키지 않고 telemetry로 알린다" do
+      ref = :telemetry_test.attach_event_handlers(self(), [[:el_graph, :checkpoint, :error]])
+
+      assert {:ok, _} =
+               ElGraph.invoke(linear_graph(), %{},
+                 checkpointer: {FailingCheckpointer, :cfg},
+                 thread_id: "t",
+                 durability: :async
+               )
+
+      assert_receive {[:el_graph, :checkpoint, :error], ^ref, %{},
+                      %{thread_id: "t", reason: :disk_full}}
     end
   end
 
