@@ -16,7 +16,7 @@ defmodule ElGraph.Executor do
     * `:exit`         — 매 step 저장 생략, 완료·인터럽트만 영속. 가장 빠름(중간 크래시 복구 불가).
   """
 
-  alias ElGraph.{Checkpoint, Ctx, Durability, Graph}
+  alias ElGraph.{Checkpoint, Ctx, Durability, Event, Graph}
 
   @default_max_steps 25
 
@@ -478,11 +478,7 @@ defmodule ElGraph.Executor do
   defp emit_event(%{event_sink: nil}, _step, _node, _event), do: :ok
 
   defp emit_event(meta, step, node, event) do
-    send(
-      meta.event_sink,
-      {:el_graph_event, %{thread_id: meta.thread_id, step: step, node: node, event: event}}
-    )
-
+    send(meta.event_sink, {:el_graph_event, Event.node(meta.thread_id, step, node, event)})
     :ok
   end
 
