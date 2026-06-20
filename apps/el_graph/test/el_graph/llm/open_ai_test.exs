@@ -4,7 +4,7 @@ defmodule ElGraph.LLM.OpenAITest do
   alias ElGraph.LLM
   alias ElGraph.LLM.OpenAI
 
-  describe "build_request/3" do
+  describe "request_spec/4" do
     test "converts a full conversation with tools" do
       messages = [
         LLM.user("검색해줘"),
@@ -14,7 +14,8 @@ defmodule ElGraph.LLM.OpenAITest do
 
       tools = [%{name: "web_search", description: "검색", input_schema: %{"type" => "object"}}]
 
-      request = OpenAI.build_request([api_key: "test-key"], messages, tools: tools, system: "봇")
+      request =
+        OpenAI.request_spec([api_key: "test-key"], messages, [tools: tools, system: "봇"], :chat)
 
       assert request.url =~ "api.openai.com"
       assert {"authorization", "Bearer test-key"} in request.headers
