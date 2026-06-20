@@ -34,11 +34,32 @@ defmodule ElGraph.DurabilityTest.RaisingCheckpointer do
   def list(_config, _thread_id), do: []
 end
 
+defmodule ElGraph.DurabilityTest.CapturingCheckpointer do
+  @moduledoc false
+  # put/put_writes 호출을 config의 test pid로 흘려 보내는 체크포인터 — Durability 모듈의
+  # 모드 디스패치를 격리 검증한다(어떤 모드가 실제로 기록/생략하는지).
+  @behaviour ElGraph.Checkpointer
+
+  @impl true
+  def put(pid, checkpoint), do: send(pid, {:put, checkpoint}) && :ok
+  @impl true
+  def get(_pid, _thread_id, _step), do: :not_found
+  @impl true
+  def put_writes(pid, thread_id, step, writes),
+    do: send(pid, {:put_writes, thread_id, step, writes}) && :ok
+
+  @impl true
+  def get_writes(_pid, _thread_id, _step), do: []
+  @impl true
+  def list(_pid, _thread_id), do: []
+end
+
 defmodule ElGraph.DurabilityTest do
   use ExUnit.Case, async: true
 
   alias ElGraph.Checkpointer.ETS
-  alias ElGraph.DurabilityTest.{FailingCheckpointer, RaisingCheckpointer}
+  alias ElGraph.Durability
+  alias ElGraph.DurabilityTest.{CapturingCheckpointer, FailingCheckpointer, RaisingCheckpointer}
   alias ElGraph.{Checkpoint, TestNodes}
 
   # a → b → c : superstep마다 체크포인트가 찍히는 선형 그래프 (sync면 step 0..3 = 4개).
@@ -227,6 +248,69 @@ defmodule ElGraph.DurabilityTest do
       assert_raise ArgumentError, fn ->
         ElGraph.invoke(linear_graph(), %{}, checkpointer: cp, thread_id: "t", durability: :bogus)
       end
+    end
+  end
+
+  # Durability seam을 격리 검증한다 — 실행기 없이 모드 디스패치/지연 빌드/none 흡수만.
+  describe "Durability 모듈 (직접)" do
+    defp handle(mode),
+      do: Durability.new(checkpointer: {CapturingCheckpointer, self()}, durability: mode)
+
+    defp tracked_checkpoint(tag) do
+      send(self(), {:built, tag})
+      %Checkpoint{thread_id: "t", step: 1, state: %{}, next: []}
+    end
+
+    test "new/1 folds a missing checkpointer into :none and still validates the mode" do
+      assert %Durability{mode: :none, checkpointer: nil} = Durability.new([])
+
+      assert %Durability{mode: :sync} =
+               Durability.new(checkpointer: {CapturingCheckpointer, self()})
+
+      assert_raise ArgumentError, ~r/durability/, fn ->
+        Durability.new(checkpointer: {CapturingCheckpointer, self()}, durability: :bogus)
+      end
+    end
+
+    test ":sync on_step builds and writes the checkpoint" do
+      assert :ok = Durability.on_step(handle(:sync), fn -> tracked_checkpoint(:s) end)
+      assert_received {:built, :s}
+      assert_received {:put, %Checkpoint{step: 1}}
+    end
+
+    test ":exit on_step skips — the checkpoint thunk is never even built" do
+      assert :ok = Durability.on_step(handle(:exit), fn -> tracked_checkpoint(:e) end)
+      refute_received {:built, :e}
+      refute_received {:put, _}
+    end
+
+    test ":none on_step is a no-op without a checkpointer" do
+      assert :ok = Durability.on_step(Durability.new([]), fn -> tracked_checkpoint(:n) end)
+      refute_received {:built, :n}
+    end
+
+    test "on_finalize writes only for :exit; on_interrupt likewise" do
+      assert :ok = Durability.on_finalize(handle(:exit), fn -> tracked_checkpoint(:f) end)
+      assert_received {:put, %Checkpoint{}}
+
+      assert :ok = Durability.on_finalize(handle(:sync), fn -> tracked_checkpoint(:f2) end)
+      refute_received {:built, :f2}
+    end
+
+    test "put_now writes regardless of mode" do
+      assert :ok = Durability.put_now(handle(:exit), %Checkpoint{thread_id: "t", step: 2})
+      assert_received {:put, %Checkpoint{step: 2}}
+    end
+
+    test ":async session enqueues to a writer and flush drains it before return" do
+      cp = %Checkpoint{thread_id: "t", step: 3, state: %{}, next: []}
+
+      Durability.with_session(handle(:async), fn d ->
+        assert :ok = Durability.on_step(d, fn -> cp end)
+        assert :ok = Durability.flush(d)
+        # flush 반환 시점엔 writer가 이미 기록했어야 한다.
+        assert_received {:put, %Checkpoint{step: 3}}
+      end)
     end
   end
 end
