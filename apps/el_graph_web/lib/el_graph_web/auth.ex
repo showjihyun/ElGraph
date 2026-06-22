@@ -23,15 +23,28 @@ defmodule ElGraphWeb.Auth do
   @spec call(Plug.Conn.t(), keyword()) :: Plug.Conn.t()
   def call(conn, _opts) do
     case conn.assigns[:api_keys] do
-      :public -> conn
+      :public -> assign(conn, :caller, :public)
       [_ | _] = keys -> authenticate(conn, keys)
       _ -> unauthorized(conn)
     end
   end
 
   defp authenticate(conn, keys) do
-    if presented_key(conn) in keys, do: conn, else: unauthorized(conn)
+    presented = presented_key(conn)
+
+    if is_binary(presented) and presented != "" and Enum.any?(keys, &secure_eq?(&1, presented)),
+      do: assign(conn, :caller, caller_id(presented)),
+      else: unauthorized(conn)
   end
+
+  # 상수 시간 비교 — `==`/`in`의 단축평가가 키를 바이트 단위로 흘리는 타이밍 사이드채널을 막는다.
+  defp secure_eq?(key, presented) when is_binary(key),
+    do: Plug.Crypto.secure_compare(key, presented)
+
+  defp secure_eq?(_key, _presented), do: false
+
+  # 원시 키 대신 안정적 불투명 식별자를 conn에 실어, Task 등 자원을 호출자별로 스코프한다.
+  defp caller_id(key), do: :crypto.hash(:sha256, key) |> Base.encode16(case: :lower)
 
   defp unauthorized(conn) do
     conn

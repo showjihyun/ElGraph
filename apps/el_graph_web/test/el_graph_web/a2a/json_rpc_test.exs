@@ -6,7 +6,7 @@ defmodule ElGraphWeb.A2A.JSONRPCTest do
   alias ElGraphWeb.TestAgent
 
   setup do
-    store = start_supervised!(TaskStore)
+    store = start_supervised!({TaskStore, name: nil})
     spec = TestAgent.registry()["echo"]
     %{deps: %{graph: spec.graph, task_store: store}}
   end
@@ -40,6 +40,16 @@ defmodule ElGraphWeb.A2A.JSONRPCTest do
   describe "tasks/get" do
     test "unknown id → -32001 Task not found", %{deps: deps} do
       assert {:error, -32001, _msg} = JSONRPC.handle("tasks/get", %{"id" => "nope"}, deps)
+    end
+
+    test "a task is not retrievable by a different caller (no IDOR)", %{deps: deps} do
+      deps_a = Map.put(deps, :caller, "caller-a")
+      deps_b = Map.put(deps, :caller, "caller-b")
+
+      {:result, %{"id" => id}} = JSONRPC.handle("message/send", message("hi"), deps_a)
+
+      assert {:result, %{"id" => ^id}} = JSONRPC.handle("tasks/get", %{"id" => id}, deps_a)
+      assert {:error, -32001, _} = JSONRPC.handle("tasks/get", %{"id" => id}, deps_b)
     end
   end
 
