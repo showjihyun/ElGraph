@@ -48,6 +48,10 @@ defmodule ElGraph.EvalTest do
       summary = Eval.run(graph(), cases)
       assert %{total: 2, passed: 1} = summary
     end
+
+    test "the default scorer fails a case that has no :expect (fallback clause)" do
+      assert %{passed: 0, results: [%{pass: false}]} = Eval.run(graph(), [%{input: %{n: 2}}])
+    end
   end
 
   describe "run/3 — aggregate metrics" do

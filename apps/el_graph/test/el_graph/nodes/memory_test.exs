@@ -68,4 +68,23 @@ defmodule ElGraph.Nodes.MemoryTest do
     assert %{hits: [top | _]} = apply(mod, fun, [%{q: "pricing"}, %ElGraph.Ctx{} | args])
     assert top == "billing and pricing question"
   end
+
+  test "record_node reads the value from a custom :from state key", %{mem: mem} do
+    {mod, fun, args} = MemoryNode.record_node(mem, @ns, from: :note)
+
+    assert %{} == apply(mod, fun, [%{note: "remember this"}, %ElGraph.Ctx{} | args])
+    assert "remember this" in Memory.recall_episodes(mem, @ns)
+  end
+
+  test "record_node records nothing when no event can be extracted", %{mem: mem} do
+    {mod, fun, args} = MemoryNode.record_node(mem, @ns, [])
+    ctx = %ElGraph.Ctx{}
+
+    # 메시지 키 자체가 없음 → last_message_content(_state) fallback
+    assert %{} == apply(mod, fun, [%{}, ctx | args])
+    # 마지막 메시지에 :content 없음 → list 절의 _ -> nil
+    assert %{} == apply(mod, fun, [%{messages: [%{role: :user}]}, ctx | args])
+
+    assert [] == Memory.recall_episodes(mem, @ns)
+  end
 end

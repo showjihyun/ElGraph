@@ -21,6 +21,17 @@ defmodule ElGraph.Agent.DedupTest do
     refute_receive {:agent_result, "d1", _}, 100
   end
 
+  test "dedup: true enables deduplication with the default window" do
+    agent = start_supervised!({TestAgent, graph: graph(), id: "d3", owner: self(), dedup: true})
+    signal = Signal.ensure_id(%Signal{type: "task.assigned", data: %{}})
+
+    Agent.send_signal(agent, signal)
+    Agent.send_signal(agent, signal)
+
+    assert_receive {:agent_result, "d3", {:ok, _}}
+    refute_receive {:agent_result, "d3", _}, 100
+  end
+
   test "without dedup, a redelivered signal runs each time" do
     agent = start_supervised!({TestAgent, graph: graph(), id: "d2", owner: self()})
     signal = Signal.ensure_id(%Signal{type: "task.assigned", data: %{}})
