@@ -13,6 +13,9 @@ defmodule ElTrace.Handoff.Collector do
 
   @event [:el_graph, :agent, :handoff]
 
+  # 엣지 버퍼 상한 — 장기 실행에서 무한 증가(메모리 누수)를 막는다. 가장 오래된 엣지부터 버린다.
+  @default_max 10_000
+
   def start_link(opts \\ []),
     do: GenServer.start_link(__MODULE__, opts, Keyword.take(opts, [:name]))
 
@@ -29,7 +32,7 @@ defmodule ElTrace.Handoff.Collector do
   def reset(server), do: GenServer.call(server, :reset)
 
   @impl GenServer
-  def init(_opts) do
+  def init(opts) do
     handler_id = {__MODULE__, self()}
 
     :ok =
@@ -40,7 +43,7 @@ defmodule ElTrace.Handoff.Collector do
         self()
       )
 
-    {:ok, %{handler_id: handler_id, edges: []}}
+    {:ok, %{handler_id: handler_id, edges: [], max: Keyword.get(opts, :max, @default_max)}}
   end
 
   @doc false
@@ -48,13 +51,18 @@ defmodule ElTrace.Handoff.Collector do
     GenServer.cast(server, {:edge, %{from: from, to: to, signal: signal}})
   end
 
+  # 예상치 못한 메타데이터 형태에도 raise하지 않는다 — raise하면 :telemetry가 이 핸들러를
+  # 영구 detach해 이후 핸드오프가 전량 소실된다.
+  def handle_event(_event, _measurements, _metadata, _server), do: :ok
+
   @impl GenServer
   def handle_cast({:edge, edge}, state) do
-    {:noreply, %{state | edges: state.edges ++ [edge]}}
+    # prepend(O(1)) 후 상한까지만 유지 — 읽을 때 reverse로 수신 순서를 복원한다.
+    {:noreply, %{state | edges: Enum.take([edge | state.edges], state.max)}}
   end
 
   @impl GenServer
-  def handle_call(:edges, _from, state), do: {:reply, state.edges, state}
+  def handle_call(:edges, _from, state), do: {:reply, Enum.reverse(state.edges), state}
   def handle_call(:reset, _from, state), do: {:reply, :ok, %{state | edges: []}}
 
   @impl GenServer

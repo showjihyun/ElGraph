@@ -47,6 +47,30 @@ defmodule ElTrace.Handoff.CollectorTest do
     assert Collector.edges(server) == []
   end
 
+  test "an unexpected handoff metadata shape does not detach the collector" do
+    server = start_collector()
+    tag = "from_#{System.unique_integer([:positive])}"
+
+    # 형태가 어긋난 이벤트가 핸들러를 raise→detach시키면, 이후 정상 엣지도 유실된다.
+    :telemetry.execute([:el_graph, :agent, :handoff], %{}, %{from: tag})
+    execute(%{from: tag, to: "b", signal: "go"})
+
+    assert mine(Collector.edges(server), tag) == [%{from: tag, to: "b", signal: "go"}]
+  end
+
+  test "bounds the edge buffer to the configured max" do
+    server =
+      start_supervised!(
+        {Collector, name: :"collector_#{System.unique_integer([:positive])}", max: 2},
+        id: System.unique_integer([:positive])
+      )
+
+    tag = "from_#{System.unique_integer([:positive])}"
+    for i <- 1..6, do: execute(%{from: tag, to: "n#{i}", signal: "go"})
+
+    assert length(Collector.edges(server)) <= 2
+  end
+
   test "build dedupes and sorts nodes via graph/1" do
     server = start_collector()
     tag = "from_#{System.unique_integer([:positive])}"

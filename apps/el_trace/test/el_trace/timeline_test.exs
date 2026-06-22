@@ -5,6 +5,12 @@ defmodule ElTrace.TimelineTest do
   alias ElTrace.TestNodes
   alias ElGraph.Checkpointer.ETS
 
+  # list가 보고한 step이 get 시점엔 사라진 경우(동시 pruning/완료) — TOCTOU.
+  defmodule VanishingCP do
+    def list(_config, _thread_id), do: [%{step: 0, version: 1}]
+    def get(_config, _thread_id, _step), do: :not_found
+  end
+
   defp ask_graph do
     ElGraph.new()
     |> ElGraph.state(:result)
@@ -45,6 +51,12 @@ defmodule ElTrace.TimelineTest do
       # step 오름차순
       steps = Enum.map(events, & &1.step)
       assert steps == Enum.sort(steps)
+    end
+  end
+
+  describe "build/2 — resilience" do
+    test "skips checkpoints that vanish between list and get (no crash)" do
+      assert Timeline.build({VanishingCP, :cfg}, "t") == []
     end
   end
 
