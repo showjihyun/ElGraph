@@ -83,7 +83,8 @@ defmodule ElGraph.Durability do
   def on_interrupt(%__MODULE__{}, _build), do: :ok
 
   @doc "부분 실패 pending writes 영속: `:sync` 동기, `:async` writer 적재, `:exit`/`:none` 생략."
-  @spec on_writes(t(), String.t(), non_neg_integer(), [{atom(), term()}]) :: :ok | {:error, term()}
+  @spec on_writes(t(), String.t(), non_neg_integer(), [{atom(), term()}]) ::
+          :ok | {:error, term()}
   def on_writes(%__MODULE__{mode: :sync} = d, thread_id, step, writes),
     do: write_writes(d, thread_id, step, writes)
 
