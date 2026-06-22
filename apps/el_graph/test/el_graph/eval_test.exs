@@ -8,6 +8,11 @@ defmodule ElGraph.EvalTest do
     def run(%{n: n}, _ctx), do: %{n: n * 2}
   end
 
+  # 판정 LLM이 비-{:ok}를 돌려줄 때 llm_judge가 크래시 없이 실패로 채점하는지 검증용.
+  defmodule ErrorLLM do
+    def chat(_config, _messages, _opts), do: {:error, :unavailable}
+  end
+
   defp graph do
     ElGraph.new()
     |> ElGraph.state(:n)
@@ -79,6 +84,15 @@ defmodule ElGraph.EvalTest do
                }
              } =
                Eval.run(graph(), [])
+    end
+
+    test "median over an even number of scores averages the two middle values" do
+      # Doubler doubles n; score = n/10 → scores 0.2, 0.4, 0.6, 0.8; median = (0.4+0.6)/2.
+      cases = for n <- 1..4, do: %{input: %{n: n}}
+      score = fn {:ok, %{n: n}}, _case -> %{pass: true, score: n / 10.0} end
+
+      assert %{metrics: %{median_score: median}} = Eval.run(graph(), cases, score: score)
+      assert_in_delta median, 0.5, 0.001
     end
   end
 
@@ -197,6 +211,25 @@ defmodule ElGraph.EvalTest do
       assert {:ok, %ElGraph.Checkpoint{state: %{sum: 110}}} =
                ElGraph.Checkpointer.ETS.get(config, thread, :latest)
     end
+
+    test "a missing checkpoint scores every scenario as a failure" do
+      {:ok, cp} = ElGraph.Checkpointer.ETS.start_link()
+      cp_spec = {ElGraph.Checkpointer.ETS, ElGraph.Checkpointer.ETS.config(cp)}
+
+      scenarios = [
+        %{resume: %{sum: 1}, expect: %{sum: 1}},
+        %{resume: %{sum: 2}, expect: %{sum: 2}}
+      ]
+
+      summary = Eval.replay_eval(chain_graph(), cp_spec, "nope", 99, scenarios)
+
+      assert %{total: 2, passed: 0, results: results} = summary
+
+      assert Enum.all?(
+               results,
+               &match?(%{pass: false, result: {:error, {:no_checkpoint, "nope", 99}}}, &1)
+             )
+    end
   end
 
   describe "llm_judge/2 — LLM-as-judge scorer" do
@@ -213,6 +246,13 @@ defmodule ElGraph.EvalTest do
       score = Eval.llm_judge({ScriptedLLM, llm}, "Is the answer correct?")
 
       cases = [%{input: %{n: 2}, expect: %{n: 5}}]
+      assert %{passed: 0, results: [%{pass: false}]} = Eval.run(graph(), cases, score: score)
+    end
+
+    test "fails the case (no crash) when the judge LLM returns a non-:ok result" do
+      score = Eval.llm_judge({ErrorLLM, :cfg}, "Is the answer correct?")
+      cases = [%{input: %{n: 2}, expect: %{n: 4}}]
+
       assert %{passed: 0, results: [%{pass: false}]} = Eval.run(graph(), cases, score: score)
     end
   end
