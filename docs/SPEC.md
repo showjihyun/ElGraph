@@ -76,7 +76,7 @@ graph =
 ```
 
 - **시그니처는 `(state, ctx)` 2-인자로 처음부터 고정한다.** `ctx`는 thread_id, step, 이벤트 방출, 동적 인터럽트, 취소 확인의 통로. 1-인자 시그니처로 시작하면 이후 모든 사용자 노드를 깨는 마이그레이션이 필요해진다.
-- **반환 계약에 `:command`/`:send` 자리를 v0.1부터 예약한다.** 실행기 구현은 M2로 미뤄도 되지만(M1은 받으면 명시적 에러), 계약을 예약해두면 공개 API가 깨지지 않는다.
+- **반환 계약의 `:command`/`:send`는 구현 완료(M2)** — `:command`는 update+goto(`:end` 포함), `:send`는 동적 fan-out(map-reduce). (설계 시점엔 v0.1 예약·M2 구현 예정이었음.)
 - durable 그래프(체크포인트 재개를 쓰는 그래프)의 노드는 MFA 권장. 익명 함수 노드는 허용하되 `compile/2` 시 경고.
 
 `ElGraph.Ctx` 공개 API:
@@ -85,8 +85,13 @@ graph =
 Ctx.emit(ctx, event)           # 스트리밍 이벤트 방출 (러너에게 메시지 전송)
 Ctx.interrupt(ctx, payload)    # 동적 인터럽트 (§3.6)
 Ctx.cancelled?(ctx)            # 협조적 취소 확인 — 긴 루프/스트림 처리 중 주기적으로 확인
-ctx.thread_id, ctx.step, ctx.node
+Ctx.memo(ctx, key, fun)        # 부수효과(LLM/툴) 메모이즈 — {node,key}로 task_cache에 영속(§3.5)
+ctx.thread_id, ctx.step, ctx.node, ctx.assigns   # assigns: 호출당 read-only 컨텍스트(:assigns 옵션)
 ```
+
+> `ElGraph.Ctx`는 공개 필드(`thread_id`/`step`/`node`/`assigns`/`private`)와 내부 상태
+> `ElGraph.Ctx.Internal`(event_sink·resume·task_cache·max_concurrency 등, `ctx.ex` 내부 정의)로
+> 나뉜다 — 노드는 공개 API만 본다.
 
 ### 3.3 Edge
 
@@ -106,10 +111,12 @@ Pregel/BSP 모델. 한 superstep = 활성 노드 실행 → 쓰기 수집 → re
 - 실행기 자체는 **순수 함수형 재귀 루프** (`ElGraph.Executor`). 부수효과는 콜백(체크포인터, 이벤트 싱크)으로 주입.
 - 호출 단위 실행은 `ElGraph.Runner`가 프로세스 1개(Task)로 감싼다. 수만 개 동시 실행은 BEAM 스케줄러가 처리.
 - **러너 소유권**: `invoke/3`·`stream/3`은 호출자에 link(호출자가 죽으면 실행도 정리 — 고아 실행 방지). L3 에이전트처럼 실행 실패를 직접 다루려는 소유자는 `start_run/3`(nolink + monitor)을 사용.
-- **실행 introspection (부록 A-1)**: 러너는 Registry에 thread_id로 등록되고, `Runner.list/1`(실행 중 thread 목록)과 `Runner.peek/2`(현재 step/활성 노드/상태 요약)를 제공한다. `:observer`·`:sys`와 함께 "지금 이 에이전트가 뭘 하고 있나"를 외부 관측 플랫폼 없이 운영 중에 답할 수 있게 한다. M3.
-- 같은 superstep의 병렬 노드는 `Task.Supervisor.async_stream_nolink`로 fan-out (`max_concurrency` 옵션). Task.Supervisor는 호스트 앱이 마운트한 것을 옵션으로 받는다.
+- **실행 introspection (부록 A-1, 구현됨)**: 러너는 Registry에 thread_id로 등록되고, `Runner.list/1`(실행 중 thread 목록)과 `Runner.peek/2`(현재 step/활성 노드/상태 요약)를 제공한다. `:observer`·`:sys`와 함께 "지금 이 에이전트가 뭘 하고 있나"를 외부 관측 플랫폼 없이 운영 중에 답할 수 있게 한다.
+- 같은 superstep의 병렬 노드는 `Task.async_stream`으로 fan-out. `max_concurrency` 옵션(기본 `System.schedulers_online()`, 양의 정수 검증), 서브그래프에도 전파.
+- **시간여행 재개**: `ElGraph.Executor.resume_from/3`(+`Runner.start_resume/2`)는 임의 과거 step의 체크포인트 상태로 새 thread를 분기(fork)해 재실행한다(원본 보존). ElTrace "여기서 분기"의 토대.
 - **안전장치:**
-  - `max_steps` 기본값 25. 초과 시 `{:error, {:max_steps_exceeded, state}}`.
+  - `max_steps` 기본값 25. 초과 시 `{:error, {:max_steps_exceeded, %{steps:, active:, state:}}}`.
+  - 노드별 **retry**: `add_node(:agent, fun, retry: [max: 3, backoff: :exponential, base: …, retry_on: […]])` — `[:el_graph, :node, :retry]` telemetry 방출.
   - **병렬 쓰기 충돌은 런타임 병합 시 검출.** 같은 superstep에서 reducer 없는 키에 2개 이상 노드가 쓰면 즉시 명확한 에러. (조건부 엣지/Send 때문에 compile 타임 완전 검증은 불가능 — 명백한 정적 케이스만 compile 경고.)
   - 노드별 타임아웃 옵션: `add_node(:slow, fun, timeout: 30_000)`.
 - **상태 복사 비용 완화 (input projection)**: 병렬 fan-out은 메시지 복사이므로 큰 상태(긴 대화 히스토리)가 브랜치 수만큼 복사된다. 64바이트 초과 바이너리는 refc로 공유되어 실비용이 줄지만, `add_node(:x, fun, input: [:messages])`로 필요한 키만 전달하는 옵션을 제공한다. 미지정 시 전체 상태 전달.
@@ -129,6 +136,8 @@ end
 `Checkpoint.step`은 "다음에 실행할 superstep"을 뜻하고 `next: []`가 완료를 뜻한다.
 어댑터 적합성은 공유 계약 테스트(`ElGraph.CheckpointerContract`)로 검증한다 — 새 어댑터(Postgres 등)는 `use`만 하면 동일 계약을 통과해야 한다.
 
+실제 저장 형태(코드 정본): `Checkpoint`는 `version·thread_id·step·state·next·interrupted·interrupts·interrupt_info·task_cache` 필드를 가지며 **구조체 전체**가 직렬화된다(따라서 `validate_serializable`는 state뿐 아니라 전체를 검사). `next`는 노드 atom이 아니라 엔트리 튜플 `{key, node, input}` 리스트. pending writes는 `{node, {update, control}}` 형태(제어 지시 포함)로 저장된다. `task_cache`는 `Ctx.memo/3`의 메모이즈 결과로, 재시도·재개로 노드가 재실행돼도 부수효과(LLM/툴)를 다시 돌리지 않게 체크포인트에 함께 영속된다.
+
 체크포인트 스키마(처음부터 동결되는 두 가지):
 
 1. **`version` 필드** — 이후 스키마는 마이그레이션으로 진화 가능. 버전 없는 스키마가 진짜 잠금이다.
@@ -139,7 +148,7 @@ end
 정책 옵션:
 
 - 보존: `keep: :all | {:last, n}` — 매 스텝 전체 상태 스냅샷은 긴 thread에서 저장소를 비대화시킨다(LangGraph의 알려진 운영 부담, 부록 A-6). `{:last, n}`이면 어댑터가 오래된 체크포인트(와 해당 step의 pending writes)를 정리한다. **전 백엔드(ETS·DETS·Mnesia·Postgres·Redis) 구현 완료.**
-- durability(영속 *시점*): `durability: :sync | :async | :exit` (invoke/resume 옵션, **구현됨**). 잦은 체크포인트의 쓰기 증폭은 이 옵션으로 대응한다(별도 빈도 옵션은 미도입).
+- durability(영속 *시점*)는 전용 seam `ElGraph.Durability`가 소유한다(구현됨) — 실행기는 모드를 모른 채 영속 지점(`on_step`/`on_finalize`/`on_interrupt`/`on_writes`/`put_now`/`flush`)에서 이 모듈만 호출한다. 모드 `:sync | :async | :exit`(체크포인터 없으면 `:none`). 쓰기 실패(반환 `{:error}`·raise·exit·throw·비계약 반환)는 모두 격리돼 `{:error}`로 정규화되고 `[:el_graph, :checkpoint, :error]` telemetry로 노출된다(`:sync`는 실행 실패, `:async/:exit`는 telemetry만).
   - `:sync`(기본) — 매 step 동기 영속. 강한 보장, 기존 동작과 동일.
   - `:async` — 실행당 순서보장 writer 프로세스에 적재(FIFO 메일박스, 반환 전 flush). 크래시 시 마지막 step 유실 가능. writer는 실행기에 link되어 스텝 순서를 보존한다.
   - `:exit` — 매 step 저장을 건너뛰고 **완료(finalize)·인터럽트만 강제 영속**(가장 빠름, 중간 크래시 복구 불가 — 빈도 옵션의 "interrupts_only" 의도를 대체).
@@ -152,18 +161,21 @@ end
 
 ### 3.6 인터럽트 / Human-in-the-loop
 
-- **정적**: `invoke(graph, input, interrupt_before: [:tools])` — 해당 노드 진입 전에 체크포인트 후 `{:interrupted, ref, state}` 반환.
+반환 형태(코드 정본): 인터럽트는 **2-튜플 `{:interrupted, map()}`**다(ref 없음). 정적은 `%{thread_id, step, before: hits, state}`, 동적은 `%{thread_id, step, node, payload, state}`. resume은 ref가 아니라 thread_id로 매칭한다.
+
+- **정적**: `invoke(graph, input, interrupt_before: [:tools])` — 해당 노드 진입 전에 체크포인트 후 `{:interrupted, %{before: …, state: …}}` 반환.
 - **동적**: 노드 내부에서 `Ctx.interrupt(ctx, %{question: "..."})`.
-  - 구현: `throw`로 비국소 탈출. 단, 노드는 병렬 Task 안에서 실행되므로 **uncaught throw는 Task exit(`{:nocatch, _}`)으로 변질된다** — 노드 실행 래퍼가 Task 내부에서 catch하여 태그된 정상 반환(`{:__interrupt__, payload}`)으로 변환하고, 실행기는 이를 받아 체크포인트 후 `{:interrupted, ref, payload}`를 반환한다. throw는 실행기 내부에 완전히 캡슐화된다.
+  - 구현: `throw`로 비국소 탈출. 단, 노드는 병렬 Task 안에서 실행되므로 **uncaught throw는 Task exit(`{:nocatch, _}`)으로 변질된다** — 노드 실행 래퍼가 Task 내부에서 catch하여 태그된 정상 반환(`{:__el_graph_interrupt__, payload}`)으로 변환하고, 실행기는 이를 받아 체크포인트 후 `{:interrupted, %{node:, payload:, …}}`를 반환한다. throw는 실행기 내부에 완전히 캡슐화된다.
+  - **체크포인터 필수**: 동적 인터럽트는 영속이 전제이므로 체크포인터가 없으면 `{:error, {:interrupt_requires_checkpointer, node, payload}}`를 반환한다.
   - **병렬 형제 노드**: 같은 superstep의 다른 노드가 인터럽트하더라도 나머지 노드는 완료까지 실행하고, 그 쓰기를 pending writes로 보존한 뒤 인터럽트를 반환한다(재개 시 재실행 방지).
   - **다중 인터럽트 매칭**: 한 노드에 `interrupt` 호출이 여러 개일 수 있으므로 resume 값은 호출 순서 카운터로 매칭한다. 따라서 **노드 내 interrupt 호출 순서는 결정적이어야 한다**(상태에만 의존, 난수/시간 분기 금지).
-  - **재개 시맨틱(문서화 필수)**: `resume(graph, ref, value)`는 인터럽트한 노드를 **처음부터 재실행**하고, `Ctx.interrupt/2`는 이번에는 주입된 `value`를 반환한다. 따라서 노드 안에서 interrupt 호출 이전의 부수효과는 중복 실행된다 — interrupt는 노드 초반에 두거나 노드를 분리하라는 가이드 제공.
+  - **재개 시맨틱(문서화 필수)**: `resume(graph, resume: value, thread_id: tid, checkpointer: cp)`는 인터럽트한 노드를 **처음부터 재실행**하고, `Ctx.interrupt/2`는 이번에는 주입된 `value`를 반환한다. 따라서 노드 안에서 interrupt 호출 이전의 부수효과는 중복 실행된다(`Ctx.memo/3`로 차단 가능) — interrupt는 노드 초반에 두거나 노드를 분리하라는 가이드 제공.
 
 ### 3.7 스트리밍 / 이벤트
 
-- `Ctx.emit/2`와 실행기 생명주기 이벤트(`:node_start`, `:node_end`, `:state_update`, `:checkpoint`)를 러너가 구독자 pid로 전송. `stream/3`은 이를 `Stream.resource`로 감싸 lazy 스트림 제공.
+- `Ctx.emit/2`와 실행기 생명주기 이벤트(스트림으로 방출되는 것은 **`:node_start`/`:node_end` 두 가지**)를 러너가 구독자 pid로 전송. 이벤트 봉투는 `ElGraph.Event`가 만든다 — node-event `%{thread_id, step, node, event}`와 run-event(`{:done, result}`/`{:down, reason}`). `stream/3`은 이를 `Stream.resource`로 감싸 lazy 스트림 제공. (체크포인트는 스트림 이벤트가 아니라 `[:el_graph, :checkpoint, :put]` telemetry, 진행 상황은 Registry로 노출.)
 - 백프레셔: 토큰 스트리밍은 네트워크가 상한이므로 기본 무제한 메일박스로 충분. 단, 구독자가 죽으면 이벤트 전송을 멈추도록 러너가 구독자를 모니터링한다.
-- `:telemetry` 이벤트는 **M1부터** 심는다(`[:el_graph, :node, :start | :stop | :exception]` 등). 나중에 넣기 가장 고통스러운 부분.
+- `:telemetry` 계측(구현 완료): span `[:el_graph, :invoke|:node|:llm,:chat]` + 단발 이벤트 `[:el_graph, :node, :retry|:interrupt]`, `[:el_graph, :checkpoint, :put|:error]`, `[:el_graph, :agent, :start|:stop|:handoff]`, `[:el_graph, :bus, :publish]`, `[:el_graph, :sensor, :signal|:error]`, `[:el_graph, :guardrail, :block]`.
 - **OTel GenAI 정렬 (R5)**: `:telemetry` 이벤트는 Elixir 표준을 유지하고, 선택 패키지 `el_graph_otel`(M3)이 OpenTelemetry GenAI 시맨틱 규약 span으로 변환한다. 매핑 방침 — L1 invoke → `invoke_workflow`, L2 Action 실행 → `execute_tool`, L3 에이전트 호출 → `invoke_agent`, `thread_id` → `gen_ai.conversation.id`, LLM 어댑터 토큰 집계 → `gen_ai.usage.input_tokens|output_tokens`. M2/M3에서 메타데이터 필드를 정할 때 이 매핑과 충돌하지 않게 한다.
 
 ### 3.8 직렬화
@@ -178,7 +190,7 @@ end
 
 ### 3.10 서브그래프
 
-컴파일된 그래프는 그 자체로 노드가 될 수 있다: `add_node(:research, subgraph)`. 그래프 모델에 v0.1부터 자리 확보(노드 타입에 `:subgraph` 변형), 실행 지원은 M2.
+컴파일된 그래프는 그 자체로 노드가 될 수 있다: `add_node(:research, subgraph)`. **실행 구현 완료(M2)**. 단, 서브그래프는 내부 체크포인트/인터럽트를 지원하지 않는다 — `{:ok, _}` 외(인터럽트·에러) 결과는 `ElGraph.SubgraphError`로 surface된다. `max_concurrency`는 서브그래프에 전파된다.
 
 ---
 
@@ -202,52 +214,62 @@ end
 - 스키마 하나(NimbleOptions)에서 **파라미터 검증 + LLM tool-calling JSON 스펙을 동시 생성.**
 - Action → 그래프 노드 어댑터 제공 (`ElGraph.Action.to_node/1`).
 - **retry 정책**: `add_node(:agent, fun, retry: [max: 3, backoff: :exponential, retry_on: [ElGraph.LLM.RateLimitError]])`. compensate보다 사용 빈도가 높으므로 코어 옵션.
-- **MCP 어댑터**: MCP 서버의 툴을 Action으로 자동 변환(`ElGraph.MCP.actions(client)`). 자체 액션 생태계를 처음부터 만들 필요를 없앤다. MCP 클라이언트는 기존 라이브러리(hermes_mcp 등) 어댑터로.
-- LLM 클라이언트는 behaviour(`ElGraph.LLM`)로만 정의. 코어는 LLM을 모른다. 기본 어댑터(Anthropic/OpenAI, Req + SSE 스트리밍)는 별도 패키지 `el_graph_llm`.
+- **MCP (양방향, 구현됨)**: 클라이언트로 외부 MCP 서버의 툴을 가져와 실행(`ElGraph.MCP.tools({mod, handle})` → `[MCP.Tool.t()]`, `MCP.Tool.execute/3`), **그리고 서버로** ElGraph Action을 외부 에이전트에 노출(`ElGraph.MCP.Server` — JSON-RPC 2.0, `tools/list`·`tools/call`·`resources`·`prompts`, 프로토콜 `2025-06-18`). 전송: stdio(`MCP.Stdio`)·Streamable HTTP 클라이언트(`MCP.Client.StreamableHTTP`, 양방향 sampling/elicitation/roots). HTTP 서버 바인딩은 `el_graph_web`의 `/mcp`(§14).
+- LLM 클라이언트는 behaviour(`ElGraph.LLM`)로만 정의. 코어는 LLM을 모른다. 기본 어댑터(OpenAI/Anthropic/Gemini)는 **in-repo**(출시 시 hex 분리 재평가). 전송·SSE·delta-fold·usage-merge·telemetry는 공용 `ElGraph.LLM.Driver`가, 프로바이더별 인코딩/디코딩은 `ElGraph.LLM.Provider` behaviour(`request_spec/4`·`parse_response/1`·`init_stream_state/0`·`decode_deltas/2`·`decode_usage/1`)가 맡는다. **SSE 스트리밍 구현됨**(선택 콜백 `stream_chat/3`, 노드 헬퍼 `LLM.stream_to_ctx/4`). 별도 앱 `el_graph_req_llm`은 ReqLLM 기반 단일 어댑터(~21 프로바이더, 비스트리밍).
 - **비용 가드 (부록 A-4)**: `max_steps`(스텝 폭주)와 별도로 LLM 어댑터 수준의 토큰/비용 예산 — `budget: [tokens: n]` 초과 시 에러가 아니라 **동적 인터럽트**로 전환해 사람이 계속/중단을 결정하게 한다. 루프 폭주로 인한 토큰 비용 증폭은 LangGraph의 알려진 운영 사고 유형이다. M2.
-- **컨텍스트 압축 — 요약 노드 (R5)**: 긴 대화 히스토리의 context rot 대응. 트리거(`tokens:`)·유지(`keep:`)·요약 모델의 3축 옵션을 가진 `SummarizeNode` 헬퍼 — 임계 초과 시 오래된 메시지를 LLM 요약으로 치환(living summary)하고, 축출된 원문은 장기 메모리 Store(§6)로 보낼 수 있다. 개수 기반 trim은 L1 reducer(§3.1). M4.
+- **컨텍스트 압축 — 요약 노드 (R5, 구현됨)**: `ElGraph.Nodes.Summarize` — 트리거는 **개수 기반 `trigger: {:messages, n}`**(설계의 `tokens:`가 아님), 초과 시 오래된 메시지를 LLM 요약으로 치환(append `{:replace}` 마커, living summary)하고 축출 원문은 장기 메모리 Store(§6)로 보낼 수 있다. 개수 기반 trim은 L1 reducer(§3.1).
 
 ## 5. L3 — Agent 런타임
 
 ```elixir
 defmodule MyApp.ResearchAgent do
-  use ElGraph.Agent,
-    graph: MyApp.ResearchGraph,
-    state: [findings: [type: {:list, :map}, default: []]],
-    skills: [ElGraph.Skills.Memory]
+  use ElGraph.Agent          # handle_signal/2 + handle_result/2 콜백을 구현
+
+  @impl true
+  def handle_signal(%ElGraph.Signal{} = sig, ctx), do: {:run, sig.data}   # 또는 :ignore
+  @impl true
+  def handle_result(result, ctx), do: :ok
 end
+
+# 그래프·정책은 런타임 start_link 옵션:
+#   {MyApp.ResearchAgent, graph:, id:, checkpointer:, thread: :per_request | {:fixed, id},
+#                         dedup: true|max, subscribe: {bus, pattern}, registry:}
+# 선언적 ReAct가 필요하면 `use ElGraph.Skills.SignalReAct, route:, input_key:, tools:,
+#   system:, reply_tag:`(+ budget:, 런타임 llm:/reply_to:/emit:).
 ```
 
 - **에이전트 = 그래프 + 영속 상태 + 메일박스를 가진 GenServer.** (프로세스 정당성: 호출 간 지속 상태 + 장애 격리 — Iron Law 통과.)
 - **GenServer 콜백 안에서 그래프를 동기 실행하지 않는다.** 실행은 `Task.Supervisor.async_nolink`로 띄우고 결과는 `handle_info`로 수신 — 실행 중에도 시그널(취소 포함) 수신 가능, 실행 크래시가 에이전트를 죽이지 않는다.
 - 에이전트 상태는 체크포인터에 영속화 — 프로세스는 crash-only로 설계, 재시작 시 체크포인트에서 복구.
-- **Signal**: CloudEvents 필드(type, source, subject, data)를 가진 struct. 라우팅(`"task.*"` 패턴 → 핸들러)만 직접 구현. 전송은 behaviour(`SignalTransport`) — 로컬 Registry dispatch 기본, Phoenix.PubSub/`:pg` 어댑터.
+- **Signal**: CloudEvents 필드(**id**, type, source, subject, data)를 가진 struct(`Signal.ensure_id/2`로 id 스탬프). 전송은 별도 behaviour가 아니라 `ElGraph.Signal.Bus`가 곧 transport(`transport: :local`=Registry / `:pg`=분산, ADR-0001). `:pg`는 Agent 구독만 분산(함수 구독 거부). 멱등 재수신은 `Signal.Dedup` + Agent `dedup:` 옵션.
 - 이름 등록: `{:via, Registry, {reg, agent_id}}`. 동적 atom 생성 금지.
 - 다수 에이전트: DynamicSupervisor(+ 필요시 PartitionSupervisor).
 - **전역 rate limiting**: LLM 프로바이더별 동시성 제한(세마포어). 에이전트 50개가 동시에 같은 API를 때리는 상황의 필수 장치.
-- Sensor는 시그널을 쏘는 GenServer의 behaviour 래퍼 — 우선순위 낮음(M4).
-- Skill은 (액션 묶음 + 시그널 라우트 + 상태 네임스페이스 + 서브그래프)의 컴포지션. **실제 에이전트 2~3개를 도그푸딩한 후 패턴을 추출하여 설계한다(M4). 미리 추상화하지 않는다.**
+- Sensor(구현됨): 시그널을 쏘는 GenServer behaviour 래퍼 — `poll/1`(`{:signal, sig, state}`/`{:quiet, state}`) + 선택 `init_state/1`·`tick/1`, `:interval` 폴링 또는 수동 tick, `[:el_graph, :sensor, :signal|:error]` telemetry.
+- Skill(구현됨, 도그푸딩 후 추출): `ElGraph.Skills.SignalReAct` — 시그널 구동 ReAct. 필수 `route:`/`input_key:`, 그 외 `tools:`/`system:`/`reply_tag:`/`budget:` + 런타임 `llm:`/`reply_to:`/`emit:`. `:emit`으로 버스 핸드오프 + `[:el_graph, :agent, :handoff]` telemetry.
+- 메모리 그래프 노드: `ElGraph.Nodes.Memory`(`recall_node`/`record_node`)로 `ElGraph.Memory`를 durable 그래프에 끼운다.
 
 ## 6. L4 — 멀티 에이전트 / 분산
 
-- 핸드오프: 노드가 `{:command, :handoff, %{to: agent_id, ...}}` 반환 → 시그널 전송.
-- **오케스트레이션 패턴 템플릿 (R5, M5)**: supervisor(오케스트레이터-워커), magentic(task ledger 기반 동적 에이전트 선택), group chat(스피커 선택 정책)을 미리 조립된 그래프 템플릿으로 제공한다. 빌딩 블록은 서브그래프(§3.10)와 `:command` 핸드오프 — 신규 추상화 없음. sequential/concurrent/map-reduce는 L1이 이미 표현하므로 템플릿 불필요.
-- **A2A 어댑터 (R5, `el_graph_a2a`, M5)**: Linux Foundation A2A 프로토콜로 조직 경계 밖 에이전트와 상호운용. MCP가 에이전트↔툴이라면 A2A는 에이전트↔에이전트. Agent Card 발행 + REST/JSON-RPC 바인딩 + SSE를 Phoenix/Req로 구현(gRPC 바인딩은 후순위). Task 생명주기가 기존 프리미티브에 1:1 매핑되므로 얇은 계층이다:
+- 핸드오프(구현됨): `{:command, :handoff}`가 아니라 Skill(`SignalReAct`)의 `:emit` 옵션 → 버스 발행 + `[:el_graph, :agent, :handoff]` telemetry. (`:command` goto는 그래프 내 노드용.)
+- **오케스트레이션 템플릿 (R5, 구현됨)**: `ElGraph.Orchestration` — `supervisor(llm, workers, opts)`(오케스트레이터-워커), `magentic(llm, workers, opts)`(task-ledger + 연속 동일선택 stall guard, `:max_stalls` 기본 2), `group_chat(agents, opts)`(LLM 인자 없음 — `:select` 정책 또는 기본 round-robin). 버스+emit 위에 구축, 신규 추상화 없음.
+- **A2A + AG-UI + MCP HTTP 서버 (R5, `el_graph_web`, 구현됨)**: 순수 매핑 `ElGraph.A2A`/`ElGraph.AGUI` + HTTP 바인딩 앱 `el_graph_web`(**Plug/Bandit, Phoenix 아님**). A2A JSON-RPC 2.0(`message/send`·`tasks/get`·`message/stream` SSE) + `.well-known/agent-card.json`, AG-UI `/agui/:name/run` SSE, MCP `/mcp`. 호스트가 `server_spec/1`로 마운트(전역 자동기동 없음). 실제 Task 매핑은 동기 `ElGraph.invoke` + 체크포인트 조회(라이브 Runner 생명주기 아님), `tasks/cancel` 없음, 상태 문자열은 소문자-하이픈(`"input-required"`):
 
-| A2A Task 상태 | ElGraph 대응 (M1 구현 완료) |
+| A2A Task 상태 | ElGraph 대응 |
 |---|---|
-| SUBMITTED / WORKING | `Runner.start_run` |
-| INPUT_REQUIRED | 동적 인터럽트 `{:interrupted, payload}` → `resume(resume: value)` |
-| COMPLETED / FAILED | `{:ok, state}` / `{:error, reason}` |
-| CANCELED | `Runner.cancel` |
-| 스트리밍 (SSE) | `ElGraph.stream` |
+| completed / failed | `{:ok, state}` / `{:error, reason}` (`A2A.to_task_state/1`) |
+| input-required | 동적 인터럽트 `{:interrupted, %{payload:}}` |
+| working / submitted | 체크포인트 조회(`A2A.task_from_checkpoint/2`) |
+| 스트리밍 (SSE) | `message/stream` → `ElGraph.stream` 프레이밍 |
 | contextId | `thread_id` |
-- 장기 메모리: thread를 넘는 기억을 위한 `ElGraph.Store` behaviour (KV + 시맨틱 검색 선택). 체크포인터(단기)와 분리.
+
+- **보안 모델 (`el_graph_web`)**: 인증 plug는 fail-closed(`api_keys` 비었/미설정 → 401, 개방은 명시적 `:public`), 토큰은 상수시간 비교, 성공 시 호출자별 opaque id 부여. A2A Task는 호출자 스코프 + 128bit 랜덤 id(IDOR 방지), `TaskStore`는 상한 FIFO, 본문 1MB 캡. 입력 가드레일(`ElGraph.Guardrail`)을 라우터에 연결.
+- 장기 메모리: thread를 넘는 기억을 위한 `ElGraph.Store` behaviour(KV: `put/4`·`get/3`·`delete/3`·`list/2`). 시맨틱 recall은 Store 위 `ElGraph.Memory`(+`Memory.Backend` Native/Mem0/Zep) 계층이 담당. 체크포인터(단기)와 분리.
 - 분산은 **공짜가 아니다**: `:pg` 메시지는 best-effort — 시그널은 at-least-once + 멱등 수신으로 설계, netsplit 시 Registry 중복 등록 처리, 클러스터 형성은 libcluster에 위임. M5의 명시적 설계 항목.
 
 ## 7. 테스트 키트 (`ElGraph.Test`, M2)
 
-- LLM/Action mock 헬퍼(Mox 호환), 그래프 step 단위 전진 헬퍼, 체크포인트 assertion.
+- `ElGraph.Test.ScriptedLLM` — 스크립트된 응답을 돌려주는 LLM(behaviour 구현, `chat/3` + 스트리밍 `stream_chat/3`의 `{:deltas, parts, message}` 형식). 공유 계약 테스트(`CheckpointerContract`/`StoreContract`)로 어댑터 적합성 검증.
 - 모든 내장 구성요소는 `async: true` 테스트와 호환(전역 상태 없음 — §3.5 ETS 인스턴스별 테이블).
 
 ## 8. 로드맵
@@ -259,7 +281,7 @@ end
 | **M3 Agent** ✅ 완료 (2026-06-13) | GenServer 에이전트(비블로킹 실행, 직렬 큐, crash-only 자동 재개), Signal+패턴 매칭, Registry 주소화/child_specs, rate limiter(모니터 기반 자동 회수), Runner introspection(list/peek), OTel GenAI **매핑 계층**(in-repo 순수 함수 — SDK 브리지는 OTel 전역 상태가 async 테스트 규율과 충돌해 `el_graph_otel` 패키지 몫으로 분리) | 충족: 도그푸딩 에이전트(`ElGraph.Demo` — 문서 Q&A, supervision 트리 + 실 OpenAI)가 실 API 통합 테스트로 동작 확인. 상시 구동: `mix run --no-halt scripts/demo.exs` |
 | **M4 Skill/Sensor/Store** ✅ 완료 (2026-06-13) | `SignalReAct` Skill(도그푸딩 2표본에서 4-파라미터 추출), `Sensor`(폴링+tick), `Signal.Bus`(패턴 구독+fan-out, 발견 8 해소), `Store`+`Store.ETS`(장기 메모리, 공유 계약), `Nodes.Summarize`(컨텍스트 압축 — append `{:replace}` 마커 + Store 축출) | 충족: DocsAgent·SummarizeAgent를 `use SignalReAct` 한 블록으로 재구성, 센서→버스→에이전트 체인·요약+Store 모두 실 OpenAI 검증 |
 | **M5 분산** 🔶 코어 완료 (2026-06-13) | 핸드오프(SignalReAct `:emit` → 버스 파이프라인), `:pg` 전송(Bus.Pg — Agent 구독 분산, 함수 구독 거부), A2A 매핑(`A2A` — Task 상태/Agent Card/Message 변환, 순수 함수) | 코어 충족: 2-에이전트 파이프라인·:pg fan-out 테스트 통과. **잔여 종료(2026-06-17)**: 멀티노드 `:peer` 통합 테스트 + at-least-once 멱등 수신(Signal id/Dedup) 완료, A2A HTTP 서버는 `el_graph_web`(§14 T1.3)로 완료, libcluster는 호스트 위임 |
-| **관측 트랙** 🔶 진행 중 (2026-06-14) | telemetry 계측(invoke/node/llm.chat span + retry/interrupt 이벤트) → OTel 브리지 → Langfuse 실전송 검증. ElTrace LiveView UI(별도 `el_trace` 앱, Phoenix/LiveView — #1 인터럽트 가시성·#2 thread 생애·#4 time-travel 분기) | Langfuse 연동은 실데이터 검증 완료. ElTrace `el_trace` 앱 분리 + LiveView 완료: Timeline 실시간 시각화(telemetry→PubSub), 인터럽트 승인/거절(resume), "여기서 분기"(Replay) — LiveViewTest + 브라우저 검증. #3 핸드오프 그래프: 데이터/렌더 계층 완료(`ElTrace.Handoff` build/to_dot/render + `Handoff.Collector`가 `[:el_graph, :agent, :handoff]` telemetry 수집, `ElTrace.handoff_graph/0`) — LiveView DOT 시각화만 잔여. 잔여: 핸드오프 LiveView UI, `el_graph_otel` 앱 분리 |
+| **관측 트랙** ✅ 완료 | telemetry 계측(invoke/node/llm.chat span + retry/interrupt 이벤트) → OTel 브리지 → Langfuse 실전송 검증. ElTrace LiveView UI(별도 `el_trace` 앱, Phoenix/LiveView — #1 인터럽트 가시성·#2 thread 생애·#4 time-travel 분기) | Langfuse 연동은 실데이터 검증 완료. ElTrace `el_trace` 앱 분리 + LiveView 완료: Timeline 실시간 시각화(telemetry→PubSub), 인터럽트 승인/거절(resume), "여기서 분기"(Replay) — LiveViewTest + 브라우저 검증. #3 핸드오프 그래프: 데이터/렌더 계층 완료(`ElTrace.Handoff` build/to_dot/render + `Handoff.Collector`가 `[:el_graph, :agent, :handoff]` telemetry 수집, `ElTrace.handoff_graph/0`) + 핸드오프 LiveView(`handoff_live.ex` — 서버 SVG + viz.js DOT)·`el_graph_otel` 앱 분리 모두 완료 |
 
 ## 9. 비목표
 
@@ -272,8 +294,8 @@ end
 
 ## 10. 품질 게이트
 
-- 모든 공개 API에 `@spec` + Dialyzer 통과. **Dialyzer 도입 완료(2026-06) — 움브렐라 6개 앱 전부**
-  (`el_graph`·`el_graph_web`·`el_trace`·`el_graph_ecto`·`el_graph_redis`·`el_graph_otel`)에 dialyxir +
+- 모든 공개 API에 `@spec` + Dialyzer 통과. **Dialyzer 도입 완료(2026-06) — 움브렐라 7개 앱 전부**
+  (`el_graph`·`el_graph_web`·`el_trace`·`el_graph_ecto`·`el_graph_redis`·`el_graph_otel`·`el_graph_req_llm`)에 dialyxir +
   `dialyzer:`(flags: error_handling/missing_return) 설정, 각 `mix dialyzer` **0 경고**. 도입 중 실타입
   버그 발견·수정: 노드/라우터/reducer 타입이 `mfa()`(=arity)로 잘못 선언돼 있던 것을
   `Graph.mfargs()`(`{module, fun, [args]}`)로 정정; `ElTrace.Telemetry.attach/0` 반환 계약을 `:ok`로
@@ -307,7 +329,7 @@ SPEC 본문은 설계 시점 표기를 유지한다. 실제 구현이 본문과 
 | SPEC 본문 | 실제 구현 | 사유 |
 |---|---|---|
 | §5 `use ElGraph.Agent, graph:, skills:` | `use ElGraph.Agent`(handle_signal/handle_result 콜백) + `use ElGraph.Skills.SignalReAct`(선언적) | Skill은 도그푸딩 후 추출 — 2표본의 공통 4-파라미터(route/tools/system/reply)로 수렴 |
-| §4 LLM 어댑터 별도 패키지 `el_graph_llm` | in-repo (`ElGraph.LLM.OpenAI/Anthropic/Gemini`) | 출시 전 분리 재평가. SSE 스트리밍은 미구현(비스트리밍 우선) |
+| §4 LLM 어댑터 별도 패키지 `el_graph_llm` | in-repo (`ElGraph.LLM.OpenAI/Anthropic/Gemini`) + `Driver`/`Provider` seam | 출시 전 분리 재평가. **SSE 스트리밍 구현 완료(§14 T1.2)** — 이전 "미구현" 표기는 폐기 |
 | §5 SignalTransport behaviour | `ElGraph.Signal.Bus`(`transport: :local`/`:pg`) | 버스가 곧 transport. `:pg`는 Agent 구독만 분산, 함수 구독 거부 |
 | §6 핸드오프 `{:command, :handoff, ...}` | Skill `:emit` 옵션 → 버스 발행 | `:command` goto는 그래프 내 노드용. 핸드오프는 버스가 자연스러움 |
 | §6 A2A 어댑터(Phoenix HTTP 서버) | `ElGraph.A2A` 순수 매핑 + **HTTP 서버 `el_graph_web`(§14 T1.3 완료)** | Task 상태가 M1 프리미티브와 1:1 → 순수 매핑 후 JSON-RPC/SSE 서버를 `el_graph_web`로 추가 |
@@ -318,7 +340,7 @@ SPEC 본문은 설계 시점 표기를 유지한다. 실제 구현이 본문과 
 
 **추가 구현(설계에 없던 것)**: `Nodes.Summarize`의 append `{:replace}` 마커(LangGraph RemoveMessage 패턴), Agent `:thread` 정책(`:per_request`/`{:fixed,id}` — 도그푸딩 마찰 7), Skill reply의 usage 포함(마찰 3).
 
-**관측 보강 (2026-06-14)**: LLM 어댑터 계측 — `ElGraph.LLM.Telemetry.instrument/3`가 세 어댑터(OpenAI/Anthropic/Gemini)의 `chat`을 `[:el_graph, :llm, :chat]` span으로 감싼다(provider·model·토큰·에러 메타). `OTel.Mapping`이 이를 GenAI `chat` generation(`gen_ai.system`/`gen_ai.request.model`/`gen_ai.usage.*`/`error.type`)으로 변환 — Langfuse 등 OTLP 백엔드가 generation으로 인식하는 핵심 데이터. **Langfuse 연동 방침**: 재구현하지 않고 OTLP로 연결. ElGraph는 telemetry/OTel span만 방출, 실제 OTLP export(trace context 전파 포함)는 `el_graph_otel` 브리지 패키지(미구현).
+**관측 보강 (2026-06-14)**: LLM 어댑터 계측 — `ElGraph.LLM.Telemetry.instrument/3`가 세 어댑터(OpenAI/Anthropic/Gemini)의 `chat`을 `[:el_graph, :llm, :chat]` span으로 감싼다(provider·model·토큰·에러 메타). `OTel.Mapping`이 이를 GenAI `chat` generation(`gen_ai.system`/`gen_ai.request.model`/`gen_ai.usage.*`/`error.type`)으로 변환 — Langfuse 등 OTLP 백엔드가 generation으로 인식하는 핵심 데이터. **Langfuse 연동 방침**: 재구현하지 않고 OTLP로 연결. ElGraph는 telemetry/OTel span만 방출, 실제 OTLP export(trace context 전파 포함)는 `el_graph_otel` 브리지 패키지(구현 완료, §14 T1.4).
 
 **실행 이벤트 계측 (2026-06-14, 2026-06-16 완료)**: `:telemetry.execute`로 단발 이벤트 — `[:el_graph, :node, :retry]`(메타: node/step/thread_id/reason/attempt), `[:el_graph, :node, :interrupt]`(`kind: :dynamic | :static` — 동적은 payload 포함, 정적은 `interrupt_before` 적중 노드마다). span(invoke/node/llm.chat)과 함께 운영 관측의 토대. 추가 단발 이벤트: `[:el_graph, :checkpoint, :put]`(thread_id/step), `[:el_graph, :agent, :start|:stop]`, `[:el_graph, :agent, :handoff]`, `[:el_graph, :bus, :publish]`(subscribers), `[:el_graph, :sensor, :signal]`(sensor 모듈/signal_type). → SPEC §13 "잔여 계측" 항목 전부 종료(checkpoint/Agent/Bus/Sensor/정적 인터럽트).
 
@@ -352,7 +374,7 @@ SPEC 본문은 설계 시점 표기를 유지한다. 실제 구현이 본문과 
 
 **관측 연계 검증**: ① **Langfuse 파이프라인** — `test/el_graph/otel/langfuse_pipeline_test.exs`(`:integration`)가 OTel SDK + pid exporter로 telemetry→Bridge→OTel span을 포착해 `invoke_workflow` 아래 병렬 노드 span 중첩을 단언(Langfuse가 OTLP로 받는 바로 그 데이터). ② **ElTrace** — `apps/el_trace/test/el_trace/new_features_integration_test.exs`가 멀티 에이전트 오케스트레이션 실행의 체크포인트 체인을 ElTrace 생애 타임라인으로 관측·분기(time-travel)함을 단언.
 
-**현황 요약(2026-06)**: el_graph 524 + el_graph_web 52 + el_trace 47 + el_graph_req_llm 6 = 기본 629 테스트(전부 async), DB 어댑터 55개(ecto 28 + redis 27)는 Postgres/Valkey 가용 시 추가 + 통합 다수. 품질 루브릭은 `docs/quality-rubric.md`.
+**현황 요약(2026-06, 최신 스위트)**: el_graph 588(580 tests + 8 doctests) + el_graph_web 56 + el_trace 51(49 + 2 doctests) + el_graph_req_llm 8 + el_graph_otel 등(전부 async). DB 어댑터(ecto/redis)와 멀티노드(`:distributed`)·실 API(`:integration`)는 Postgres/Valkey/키 가용 시 추가. 카운트는 코드 변경 시 갱신 — 정확값은 `mix test`. 품질 루브릭은 `docs/quality-rubric.md`.
 
 ## 부록 A — LangGraph 약점 대응표
 
