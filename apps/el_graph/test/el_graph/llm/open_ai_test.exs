@@ -87,6 +87,11 @@ defmodule ElGraph.LLM.OpenAITest do
                 }
               }} = OpenAI.parse_response(body)
     end
+
+    test "returns {:error, {:unexpected_response, _}} for an unexpected body shape" do
+      body = %{"error" => %{"message" => "bad request"}}
+      assert {:error, {:unexpected_response, ^body}} = OpenAI.parse_response(body)
+    end
   end
 
   describe "chat/3" do

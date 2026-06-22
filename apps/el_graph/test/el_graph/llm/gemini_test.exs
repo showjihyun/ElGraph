@@ -75,6 +75,11 @@ defmodule ElGraph.LLM.GeminiTest do
                 }
               }} = Gemini.parse_response(body)
     end
+
+    test "returns {:error, {:unexpected_response, _}} for an unexpected body shape" do
+      body = %{"promptFeedback" => %{"blockReason" => "SAFETY"}}
+      assert {:error, {:unexpected_response, ^body}} = Gemini.parse_response(body)
+    end
   end
 
   describe "chat/3" do

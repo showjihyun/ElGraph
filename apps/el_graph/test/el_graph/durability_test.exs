@@ -54,12 +54,41 @@ defmodule ElGraph.DurabilityTest.CapturingCheckpointer do
   def list(_pid, _thread_id), do: []
 end
 
+defmodule ElGraph.DurabilityTest.MisbehavingCheckpointer do
+  @moduledoc false
+  # 쓰기가 exit/throw하거나 계약 밖 값(:ok|{:error} 외)을 반환하는 체크포인터 — config가
+  # 동작을 고른다. Durability.run_write의 catch :exit / catch :throw / 비계약 반환 격리 검증용.
+  @behaviour ElGraph.Checkpointer
+
+  @impl true
+  def put(action, _checkpoint), do: act(action)
+  @impl true
+  def get(_action, _thread_id, _step), do: :not_found
+  @impl true
+  def put_writes(action, _thread_id, _step, _writes), do: act(action)
+  @impl true
+  def get_writes(_action, _thread_id, _step), do: []
+  @impl true
+  def list(_action, _thread_id), do: []
+
+  defp act(:exit), do: exit(:boom)
+  defp act(:throw), do: throw(:nope)
+  defp act(:weird), do: :weird
+end
+
 defmodule ElGraph.DurabilityTest do
   use ExUnit.Case, async: true
 
   alias ElGraph.Checkpointer.ETS
   alias ElGraph.Durability
-  alias ElGraph.DurabilityTest.{CapturingCheckpointer, FailingCheckpointer, RaisingCheckpointer}
+
+  alias ElGraph.DurabilityTest.{
+    CapturingCheckpointer,
+    FailingCheckpointer,
+    MisbehavingCheckpointer,
+    RaisingCheckpointer
+  }
+
   alias ElGraph.{Checkpoint, TestNodes}
 
   # a → b → c : superstep마다 체크포인트가 찍히는 선형 그래프 (sync면 step 0..3 = 4개).
@@ -311,6 +340,39 @@ defmodule ElGraph.DurabilityTest do
         # flush 반환 시점엔 writer가 이미 기록했어야 한다.
         assert_received {:put, %Checkpoint{step: 3}}
       end)
+    end
+
+    test ":async on_writes enqueues put_writes and flush drains it before return" do
+      Durability.with_session(handle(:async), fn d ->
+        assert :ok = Durability.on_writes(d, "t", 5, [{:a, %{x: 1}}])
+        assert :ok = Durability.flush(d)
+        assert_received {:put_writes, "t", 5, [{:a, %{x: 1}}]}
+      end)
+    end
+
+    test "isolates an exiting adapter write as {:error, {:exit, _}} + telemetry" do
+      ref = :telemetry_test.attach_event_handlers(self(), [[:el_graph, :checkpoint, :error]])
+      d = Durability.new(checkpointer: {MisbehavingCheckpointer, :exit})
+
+      assert {:error, {:exit, :boom}} =
+               Durability.put_now(d, %Checkpoint{thread_id: "t", step: 1})
+
+      assert_receive {[:el_graph, :checkpoint, :error], ^ref, %{},
+                      %{thread_id: "t", step: 1, reason: {:exit, :boom}}}
+    end
+
+    test "isolates a throwing adapter write as {:error, {:throw, _}}" do
+      d = Durability.new(checkpointer: {MisbehavingCheckpointer, :throw})
+
+      assert {:error, {:throw, :nope}} =
+               Durability.put_now(d, %Checkpoint{thread_id: "t", step: 1})
+    end
+
+    test "surfaces a non-contract return as {:error, {:invalid_checkpointer_return, _}}" do
+      d = Durability.new(checkpointer: {MisbehavingCheckpointer, :weird})
+
+      assert {:error, {:invalid_checkpointer_return, :weird}} =
+               Durability.put_now(d, %Checkpoint{thread_id: "t", step: 1})
     end
   end
 end
