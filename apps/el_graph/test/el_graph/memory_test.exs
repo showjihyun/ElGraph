@@ -213,5 +213,9 @@ defmodule ElGraph.MemoryTest do
       assert :ok = Memory.forget(mem, @ns, :procedural, "greeting")
       assert %{} == Memory.recall_rules(mem, @ns)
     end
+
+    test "episodic is not key-forgettable — returns an error, not a crash", %{mem: mem} do
+      assert {:error, :episodic_not_supported} = Memory.forget(mem, @ns, :episodic, "anything")
+    end
   end
 end

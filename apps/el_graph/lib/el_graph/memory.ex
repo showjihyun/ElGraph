@@ -192,9 +192,11 @@ defmodule ElGraph.Memory do
   @doc """
   키로 사실(`:semantic`)/규칙(`:procedural`)을 삭제한다.
 
-  episodic은 키가 시간 정렬용 내부 키라 키 기반 삭제 대상이 아니다(미지원).
+  episodic은 키가 시간 정렬용 내부 키라 키 기반 삭제 대상이 아니다 — `{:error,
+  :episodic_not_supported}`를 반환한다(크래시 대신 명시적 에러).
   """
-  @spec forget(t(), namespace(), :semantic | :episodic | :procedural, String.t()) :: :ok
+  @spec forget(t(), namespace(), :semantic | :episodic | :procedural, String.t()) ::
+          :ok | {:error, :episodic_not_supported}
   def forget(%__MODULE__{store: {mod, config}}, ns, :semantic, key) do
     mod.delete(config, scope(ns, "semantic-history"), key)
     mod.delete(config, scope(ns, "semantic"), key)
@@ -203,6 +205,8 @@ defmodule ElGraph.Memory do
   def forget(%__MODULE__{store: {mod, config}}, ns, :procedural, key) do
     mod.delete(config, scope(ns, "procedural"), key)
   end
+
+  def forget(%__MODULE__{}, _ns, :episodic, _key), do: {:error, :episodic_not_supported}
 
   ## 내부
 

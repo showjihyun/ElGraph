@@ -3,8 +3,8 @@ defmodule ElGraph.A2A do
   A2A(Agent2Agent) 프로토콜 매핑 (SPEC §6, 부록 A2A 표).
 
   조직 경계 밖 에이전트와의 상호운용을 위한 순수 변환 계층이다. ElGraph 실행 결과를
-  A2A Task 상태로, Skill 설정을 Agent Card로 변환한다. HTTP 서버(REST/JSON-RPC 바인딩,
-  SSE)는 이 매핑 위의 얇은 계층으로 별도 패키지(`el_graph_a2a`)가 담당한다.
+  A2A Task 상태로, Skill 설정을 Agent Card로 변환한다. HTTP 서버(JSON-RPC 바인딩, SSE)는
+  이 매핑 위의 얇은 계층으로 별도 앱 `el_graph_web`(Plug/Bandit)가 담당한다.
 
   Task 상태 매핑 (M1 프리미티브 ↔ A2A):
     `{:ok, _}`          → COMPLETED
