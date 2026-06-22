@@ -12,15 +12,28 @@ defmodule ElGraph.LLM.ReqLLMTest do
         LLM.tool_result("c1", "web_search", %{results: [1]})
       ]
 
-      ctx = Adapter.encode_context(messages, system: "너는 봇이다")
+      assert {:ok, ctx} = Adapter.encode_context(messages, system: "너는 봇이다")
 
       assert %ReqLLM.Context{} = ctx
       assert Enum.map(ctx.messages, & &1.role) == [:system, :user, :assistant, :tool]
     end
 
     test "no system option omits the system message" do
-      ctx = Adapter.encode_context([LLM.user("hi")], [])
+      assert {:ok, ctx} = Adapter.encode_context([LLM.user("hi")], [])
       assert Enum.map(ctx.messages, & &1.role) == [:user]
+    end
+
+    test "an unencodable message → {:error, {:invalid_message, _}}" do
+      assert {:error, {:invalid_message, %{role: :bogus}}} =
+               Adapter.encode_context([%{role: :bogus}], [])
+    end
+  end
+
+  describe "chat/3 error handling" do
+    test "a malformed message makes chat return {:error, _} instead of crashing" do
+      # 인코딩이 API 호출 전에 일어나므로, 잘못된 메시지는 네트워크 I/O 없이 단락된다.
+      assert {:error, {:invalid_message, %{role: :bogus}}} =
+               Adapter.chat([model: "openai:gpt-4o"], [%{role: :bogus}], [])
     end
   end
 

@@ -41,15 +41,17 @@ defmodule ElGraph.LLM.ReqLLM do
   @impl ElGraph.LLM
   def chat(config, messages, opts) do
     model = Keyword.fetch!(config, :model)
-    context = encode_context(messages, opts)
-    req_opts = build_opts(config, opts)
 
-    ElGraph.LLM.Telemetry.instrument(:req_llm, model, fn ->
-      case ReqLLM.generate_text(model, context, req_opts) do
-        {:ok, %Response{} = response} -> decode_response(response)
-        {:error, reason} -> {:error, reason}
-      end
-    end)
+    with {:ok, context} <- encode_context(messages, opts) do
+      req_opts = build_opts(config, opts)
+
+      ElGraph.LLM.Telemetry.instrument(:req_llm, model, fn ->
+        case ReqLLM.generate_text(model, context, req_opts) do
+          {:ok, %Response{} = response} -> decode_response(response)
+          {:error, reason} -> {:error, reason}
+        end
+      end)
+    end
   end
 
   @doc false
@@ -60,7 +62,20 @@ defmodule ElGraph.LLM.ReqLLM do
         prompt -> [Context.system(prompt)]
       end
 
-    Context.new(system ++ Enum.map(messages, &encode_message/1))
+    with {:ok, encoded} <- encode_messages(messages) do
+      {:ok, Context.new(system ++ encoded)}
+    end
+  end
+
+  # 메시지를 하나라도 인코딩 못 하면 {:error}로 멈춘다 — 형태가 어긋난 메시지에 chat이
+  # FunctionClauseError로 크래시하지 않고 {:error}를 반환하도록(behaviour 계약).
+  defp encode_messages(messages) do
+    Enum.reduce_while(messages, {:ok, []}, fn message, {:ok, acc} ->
+      case encode_message(message) do
+        {:error, _reason} = error -> {:halt, error}
+        encoded -> {:cont, {:ok, acc ++ [encoded]}}
+      end
+    end)
   end
 
   defp encode_message(%{role: :user, content: content}), do: Context.user(content)
@@ -77,8 +92,10 @@ defmodule ElGraph.LLM.ReqLLM do
     end
   end
 
-  defp encode_message(%{role: :tool} = message),
-    do: Context.tool_result(message.tool_call_id, message.name, message.content)
+  defp encode_message(%{role: :tool, tool_call_id: id, name: name, content: content}),
+    do: Context.tool_result(id, name, content)
+
+  defp encode_message(other), do: {:error, {:invalid_message, other}}
 
   @doc false
   def encode_tools(nil), do: nil
