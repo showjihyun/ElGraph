@@ -21,9 +21,12 @@ defmodule ElTrace.Timeline do
   def build({mod, config}, thread_id) do
     config
     |> then(&mod.list(&1, thread_id))
-    |> Enum.map(fn %{step: step} ->
-      {:ok, checkpoint} = mod.get(config, thread_id, step)
-      to_event(checkpoint)
+    |> Enum.flat_map(fn %{step: step} ->
+      # list와 get 사이에 체크포인트가 사라질 수 있다(동시 pruning/완료) — 크래시 대신 건너뛴다.
+      case mod.get(config, thread_id, step) do
+        {:ok, checkpoint} -> [to_event(checkpoint)]
+        :not_found -> []
+      end
     end)
   end
 

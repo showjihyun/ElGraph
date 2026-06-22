@@ -49,6 +49,18 @@ defmodule ElTrace.SessionsTest do
     end
   end
 
+  describe "cap eviction" do
+    test "evicts the oldest session beyond the max cap (bounded memory)" do
+      pid = start_supervised!({Sessions, max: 2}, id: :capped_sessions)
+      t = Sessions.table(pid)
+
+      for i <- 1..3, do: Sessions.register(t, "s#{i}", :g, {FakeCP, %{}})
+
+      ids = t |> Sessions.list() |> Enum.map(& &1.thread_id) |> Enum.sort()
+      assert ids == ["s2", "s3"]
+    end
+  end
+
   describe "PubSub" do
     test "register broadcasts :sessions_changed to subscribers", %{table: t} do
       Phoenix.PubSub.subscribe(ElTrace.PubSub, "sessions")
