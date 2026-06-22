@@ -3,6 +3,28 @@ defmodule ElGraph.ActionTest do
 
   alias ElGraph.TestActions.{Failing, Search}
 
+  # 모든 type_schema/1 절을 to_tool_spec(공개 API)로 한 번에 통과시키기 위한 액션.
+  defmodule AllTypes do
+    use ElGraph.Action,
+      name: "all_types",
+      description: "every type_schema branch",
+      schema: [
+        b: [type: :boolean],
+        pi: [type: :pos_integer],
+        nn: [type: :non_neg_integer],
+        f: [type: :float],
+        a: [type: :atom],
+        m: [type: :map],
+        l: [type: {:list, :string}],
+        choice: [type: {:in, [:x, :y]}],
+        num_choice: [type: {:in, [1, 2]}],
+        anything: [type: :any]
+      ]
+
+    @impl true
+    def run(_params, _context), do: {:ok, %{}}
+  end
+
   describe "metadata" do
     test "exposes name, description, and schema from use options" do
       assert "web_search" = Search.name()
@@ -59,6 +81,23 @@ defmodule ElGraph.ActionTest do
              } = Search.to_tool_spec()
 
       assert limit_schema["description"] == "최대 결과 수"
+    end
+
+    test "maps every NimbleOptions type to its JSON Schema shape" do
+      %{input_schema: %{"properties" => props}} = AllTypes.to_tool_spec()
+
+      assert props["b"] == %{"type" => "boolean"}
+      assert props["pi"] == %{"type" => "integer"}
+      assert props["nn"] == %{"type" => "integer"}
+      assert props["f"] == %{"type" => "number"}
+      assert props["a"] == %{"type" => "string"}
+      assert props["m"] == %{"type" => "object"}
+      assert props["l"] == %{"type" => "array", "items" => %{"type" => "string"}}
+      # {:in, _} → enum; atom choices stringify, integer choices pass through (to_json_value).
+      assert props["choice"] == %{"enum" => ["x", "y"]}
+      assert props["num_choice"] == %{"enum" => [1, 2]}
+      # unknown/unmapped type → empty schema (the _other catchall).
+      assert props["anything"] == %{}
     end
   end
 

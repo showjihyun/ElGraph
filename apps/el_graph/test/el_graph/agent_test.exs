@@ -46,6 +46,22 @@ defmodule ElGraph.AgentTest do
 
   defp signal(data \\ %{}), do: %Signal{type: "task.assigned", data: data}
 
+  # 시작을 알리고 영원히 블록한다 — 실행 도중 러너를 죽여 :DOWN 경로를 관찰하기 위해.
+  def blocking_node(_state, _ctx, test) do
+    send(test, :run_started)
+
+    receive do
+      :never -> %{result: "x"}
+    end
+  end
+
+  defp blocking_graph(test) do
+    ElGraph.new()
+    |> ElGraph.state(:result)
+    |> ElGraph.add_node(:block, {__MODULE__, :blocking_node, [test]})
+    |> ElGraph.compile(entry: :block)
+  end
+
   describe "에이전트 = 그래프 + 메일박스 (SPEC §5)" do
     test "a signal triggers a graph run and handle_result receives the outcome" do
       agent = start_supervised!({TestAgent, graph: sequential_graph(), id: "a1", owner: self()})
@@ -159,6 +175,29 @@ defmodule ElGraph.AgentTest do
       )
 
       assert_receive {:agent_result, "rec", {:ok, %{messages: ["s", "a", "b"]}}}, 2_000
+    end
+
+    test "a crashed run surfaces {:error, {:run_down, _}} and the agent survives + dequeues" do
+      test = self()
+      run_reg = ElGraph.AgentTest.RunReg
+      start_supervised!({Registry, keys: :unique, name: run_reg})
+
+      agent =
+        start_supervised!(
+          {TestAgent, graph: blocking_graph(test), id: "down", owner: test, run_registry: run_reg}
+        )
+
+      Agent.send_signal(agent, signal())
+
+      # 노드가 시작을 알리면 러너는 활성이고 introspection Registry에 등록돼 있다.
+      assert_receive :run_started, 1_000
+
+      [%{pid: run_pid}] = ElGraph.Runner.list(run_reg)
+      Process.exit(run_pid, :kill)
+
+      # 러너 크래시는 호출자(에이전트)를 죽이지 않고 {:error, {:run_down, _}}로 surface된다.
+      assert_receive {:agent_result, "down", {:error, {:run_down, :killed}}}, 1_000
+      assert %{running: false, queued: 0} = Agent.status(agent)
     end
   end
 end

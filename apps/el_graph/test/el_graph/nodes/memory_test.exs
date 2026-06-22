@@ -5,6 +5,23 @@ defmodule ElGraph.Nodes.MemoryTest do
   alias ElGraph.Nodes.Memory, as: MemoryNode
   alias ElGraph.Store.ETS, as: Store
 
+  # 결정적 테스트 embedder: a-z 글자 빈도 벡터 (어휘가 비슷할수록 코사인 유사도↑).
+  defmodule CharEmbedder do
+    @behaviour ElGraph.Memory.Embedder
+
+    @impl true
+    def embed(text) do
+      freq =
+        text
+        |> String.downcase()
+        |> String.to_charlist()
+        |> Enum.filter(&(&1 in ?a..?z))
+        |> Enum.frequencies()
+
+      for c <- ?a..?z, do: Map.get(freq, c, 0) / 1.0
+    end
+  end
+
   setup do
     pid = start_supervised!({Store, []})
     %{mem: Memory.new({Store, Store.config(pid)})}
@@ -35,5 +52,20 @@ defmodule ElGraph.Nodes.MemoryTest do
 
     {mod, fun, args} = MemoryNode.recall_node(mem, @ns, into: :history, limit: 1)
     assert %{history: ["new"]} = apply(mod, fun, [%{}, %ElGraph.Ctx{} | args])
+  end
+
+  test "recall_node with :embedder does semantic recall over the :query_key state field", %{
+    mem: mem
+  } do
+    :ok = Memory.record_episode(mem, @ns, "billing and pricing question", at: 1)
+
+    # 최신(at:2)이지만 어휘가 다르다 — 시맨틱 회수면 쿼리에 가까운 at:1이 위로 와야 한다.
+    :ok = Memory.record_episode(mem, @ns, "weather forecast today", at: 2)
+
+    {mod, fun, args} =
+      MemoryNode.recall_node(mem, @ns, embedder: CharEmbedder, query_key: :q, into: :hits)
+
+    assert %{hits: [top | _]} = apply(mod, fun, [%{q: "pricing"}, %ElGraph.Ctx{} | args])
+    assert top == "billing and pricing question"
   end
 end
