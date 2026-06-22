@@ -3,6 +3,7 @@ defmodule ElGraphWeb.AuthTest do
   import Plug.Test
   import Plug.Conn
 
+  alias ElGraphWeb.Auth
   alias ElGraphWeb.Router
   alias ElGraphWeb.TestAgent
 
@@ -62,5 +63,17 @@ defmodule ElGraphWeb.AuthTest do
     conn = call(conn(:get, "/a2a/echo/agent-card"), :public)
     assert conn.status == 200
     assert %{"name" => "echo"} = Jason.decode!(conn.resp_body)
+  end
+
+  test "a valid key assigns an opaque caller id (not the raw key), for task scoping" do
+    conn =
+      conn(:get, "/")
+      |> put_req_header("authorization", "Bearer secret")
+      |> assign(:api_keys, ["secret"])
+      |> Auth.call(Auth.init([]))
+
+    refute conn.halted
+    assert is_binary(conn.assigns[:caller])
+    refute conn.assigns[:caller] == "secret"
   end
 end

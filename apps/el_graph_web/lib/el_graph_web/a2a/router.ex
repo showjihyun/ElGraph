@@ -82,7 +82,12 @@ defmodule ElGraphWeb.A2A.Router do
     body = conn.body_params
     id = Map.get(body, "id")
     params = Map.get(body, "params", %{})
-    deps = %{graph: spec.graph, task_store: conn.assigns[:task_store]}
+
+    deps = %{
+      graph: spec.graph,
+      task_store: conn.assigns[:task_store],
+      caller: conn.assigns[:caller]
+    }
 
     case guard_rpc(conn, params) do
       {:blocked, reason} ->

@@ -19,7 +19,11 @@ defmodule ElGraphWeb.A2A.JSONRPC do
   alias ElGraph.A2A
   alias ElGraphWeb.TaskStore
 
-  @type deps :: %{graph: ElGraph.Graph.t(), task_store: TaskStore.ref()}
+  @type deps :: %{
+          required(:graph) => ElGraph.Graph.t(),
+          required(:task_store) => TaskStore.ref(),
+          optional(:caller) => term()
+        }
   @type result :: {:result, map()} | {:error, integer(), String.t()} | {:stream, Enumerable.t()}
 
   @doc "JSON-RPC 메서드를 디스패치한다."
@@ -27,12 +31,12 @@ defmodule ElGraphWeb.A2A.JSONRPC do
   def handle("message/send", %{"message" => message}, deps) do
     result = ElGraph.invoke(deps.graph, A2A.message_to_input(message))
     task = build_task(result)
-    :ok = TaskStore.put(deps.task_store, task)
+    :ok = TaskStore.put(deps.task_store, task, caller(deps))
     {:result, task}
   end
 
   def handle("tasks/get", %{"id" => id}, deps) do
-    case TaskStore.get(deps.task_store, id) do
+    case TaskStore.get(deps.task_store, id, caller(deps)) do
       {:ok, task} -> {:result, task}
       :error -> {:error, -32001, "Task not found"}
     end
@@ -67,7 +71,12 @@ defmodule ElGraphWeb.A2A.JSONRPC do
   defp result_payload({:error, reason}), do: reason
   defp result_payload({:interrupted, info}), do: info
 
-  defp new_id, do: Integer.to_string(System.unique_integer([:positive]))
+  # 호출자별 Task 스코프용 식별자 — 인증 plug가 conn.assigns[:caller]로 싣고 라우터가 deps에 넣는다.
+  defp caller(deps), do: Map.get(deps, :caller)
+
+  # 추측 불가능한 Task id — 단조증가 정수(System.unique_integer)는 열거로 타 호출자 Task를
+  # 노출시키므로 128비트 난수로 만든다.
+  defp new_id, do: 16 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
 
   ## 스트리밍 — ElGraph 스트림 원소를 A2A status/artifact-update result 프레임으로 매핑
 
