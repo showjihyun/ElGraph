@@ -91,6 +91,11 @@ defmodule ElGraph.LLM.AnthropicTest do
                 }
               }} = Anthropic.parse_response(body)
     end
+
+    test "returns {:error, {:unexpected_response, _}} for an unexpected body shape" do
+      body = %{"error" => %{"type" => "overloaded_error"}}
+      assert {:error, {:unexpected_response, ^body}} = Anthropic.parse_response(body)
+    end
   end
 
   describe "chat/3" do
