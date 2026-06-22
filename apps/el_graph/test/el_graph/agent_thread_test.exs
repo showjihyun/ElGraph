@@ -70,5 +70,31 @@ defmodule ElGraph.AgentThreadTest do
         )
       end
     end
+
+    test "{:fixed, id} restores completed conversation state on (re)start, without re-running" do
+      cp = start_supervised!(ETS)
+      cp_spec = {ETS, ETS.config(cp)}
+
+      # 이전 생애: 한 번 실행해 완료 체크포인트(next: [])를 남긴다.
+      {:ok, %{count: 1}} =
+        ElGraph.invoke(counting_graph(), %{}, checkpointer: cp_spec, thread_id: "conv-restore")
+
+      agent =
+        start_supervised!(
+          {ThreadAgent,
+           graph: counting_graph(),
+           id: "tr",
+           owner: self(),
+           checkpointer: cp_spec,
+           thread: {:fixed, "conv-restore"}}
+        )
+
+      # 완료된 thread는 복원만 하고 재실행하지 않는다.
+      refute_receive {:done, _}, 100
+
+      # 다음 시그널은 복원된 상태에서 누적된다 → count 2.
+      Agent.send_signal(agent, %Signal{type: "go", data: %{}})
+      assert_receive {:done, 2}
+    end
   end
 end

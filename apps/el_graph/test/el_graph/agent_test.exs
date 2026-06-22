@@ -62,6 +62,13 @@ defmodule ElGraph.AgentTest do
     |> ElGraph.compile(entry: :block)
   end
 
+  defp ask_graph do
+    ElGraph.new()
+    |> ElGraph.state(:result)
+    |> ElGraph.add_node(:ask, &TestNodes.ask/2)
+    |> ElGraph.compile(entry: :ask)
+  end
+
   describe "에이전트 = 그래프 + 메일박스 (SPEC §5)" do
     test "a signal triggers a graph run and handle_result receives the outcome" do
       agent = start_supervised!({TestAgent, graph: sequential_graph(), id: "a1", owner: self()})
@@ -141,6 +148,28 @@ defmodule ElGraph.AgentTest do
       Agent.send_signal(Agent.via(ElGraph.AgentTest.Registry, "named-1"), signal())
 
       assert_receive {:agent_result, "named-1", {:ok, %{result: "HELLO"}}}
+    end
+
+    test "an interrupted run reports :interrupted in agent stop telemetry" do
+      ref = :telemetry_test.attach_event_handlers(self(), [[:el_graph, :agent, :stop]])
+      cp = start_supervised!(ETS)
+
+      # 동적 인터럽트(:ask)는 체크포인터가 있어야 {:interrupted}로 반환된다.
+      agent =
+        start_supervised!(
+          {TestAgent,
+           graph: ask_graph(),
+           id: "int",
+           owner: self(),
+           checkpointer: {ETS, ETS.config(cp)},
+           thread_id: "int-t"}
+        )
+
+      Agent.send_signal(agent, signal())
+
+      assert_receive {[:el_graph, :agent, :stop], ^ref, %{},
+                      %{agent_id: "int", status: :interrupted}},
+                     1_000
     end
   end
 
