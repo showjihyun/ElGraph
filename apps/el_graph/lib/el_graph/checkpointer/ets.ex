@@ -44,7 +44,7 @@ defmodule ElGraph.Checkpointer.ETS do
 
   @impl ElGraph.Checkpointer
   def put(%{checkpoints: table} = config, %Checkpoint{} = checkpoint) do
-    with :ok <- Checkpoint.validate_serializable(checkpoint.state) do
+    with :ok <- Checkpoint.validate_serializable(checkpoint) do
       true = :ets.insert(table, {{checkpoint.thread_id, checkpoint.step}, checkpoint})
       prune(config, checkpoint.thread_id)
       :ok

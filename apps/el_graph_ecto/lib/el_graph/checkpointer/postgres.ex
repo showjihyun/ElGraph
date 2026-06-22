@@ -31,7 +31,7 @@ defmodule ElGraph.Checkpointer.Postgres do
 
   @impl true
   def put(%{repo: repo} = config, %Checkpoint{} = checkpoint) do
-    with :ok <- Checkpoint.validate_serializable(checkpoint.state) do
+    with :ok <- Checkpoint.validate_serializable(checkpoint) do
       SQL.query!(
         repo,
         """

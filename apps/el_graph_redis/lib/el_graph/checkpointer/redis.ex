@@ -43,7 +43,7 @@ defmodule ElGraph.Checkpointer.Redis do
 
   @impl true
   def put(%{conn: conn, prefix: p} = config, %Checkpoint{} = checkpoint) do
-    with :ok <- Checkpoint.validate_serializable(checkpoint.state) do
+    with :ok <- Checkpoint.validate_serializable(checkpoint) do
       {:ok, _} =
         Redix.pipeline(conn, [
           [

@@ -67,7 +67,7 @@ defmodule ElGraph.Checkpointer.Mnesia do
 
   @impl ElGraph.Checkpointer
   def put(%{table: table} = config, %Checkpoint{} = checkpoint) do
-    with :ok <- Checkpoint.validate_serializable(checkpoint.state) do
+    with :ok <- Checkpoint.validate_serializable(checkpoint) do
       :ok = :mnesia.dirty_write({table, {:cp, checkpoint.thread_id, checkpoint.step}, checkpoint})
       prune(config, checkpoint.thread_id)
       :ok

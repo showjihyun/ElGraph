@@ -64,6 +64,22 @@ defmodule ElGraph.CheckpointerContract do
           assert :not_found = mod.get(config, "t1", :latest)
         end
 
+        test "a non-serializable value outside :state (e.g. task_cache) is rejected",
+             %{mod: mod, config: config} do
+          # 체크포인트는 통째로 직렬화되므로 :state 밖(task_cache/interrupt_info 등)의 pid도
+          # 거부돼야 한다 — 그러지 않으면 영속 후 재개 시 죽은 pid로 복원돼 무결성이 깨진다.
+          checkpoint = %Checkpoint{
+            thread_id: "t1",
+            step: 0,
+            state: %{},
+            next: [],
+            task_cache: %{{:node, 1} => self()}
+          }
+
+          assert {:error, {:not_serializable, _value}} = mod.put(config, checkpoint)
+          assert :not_found = mod.get(config, "t1", :latest)
+        end
+
         test "list returns checkpoint metadata in step order", %{mod: mod, config: config} do
           for step <- 0..2, do: :ok = mod.put(config, contract_cp("t1", step, %{}))
           :ok = mod.put(config, contract_cp("other", 9, %{}))
