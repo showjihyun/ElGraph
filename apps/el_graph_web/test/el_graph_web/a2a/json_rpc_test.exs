@@ -57,6 +57,10 @@ defmodule ElGraphWeb.A2A.JSONRPCTest do
     test "unknown method → -32601", %{deps: deps} do
       assert {:error, -32601, _msg} = JSONRPC.handle("bogus/method", %{}, deps)
     end
+
+    test "a message without \"parts\" does not crash (graceful empty input)", %{deps: deps} do
+      assert {:result, _task} = JSONRPC.handle("message/send", %{"message" => %{}}, deps)
+    end
   end
 
   describe "message/stream" do

@@ -95,12 +95,15 @@ defmodule ElGraph.A2A do
       %{question: "엘릭서 검색"}
   """
   @spec message_to_input(map()) :: %{question: String.t()}
-  def message_to_input(%{"parts" => parts}) do
+  def message_to_input(%{"parts" => parts}) when is_list(parts) do
     text =
       parts
-      |> Enum.filter(&Map.has_key?(&1, "text"))
+      |> Enum.filter(&(is_map(&1) and is_binary(&1["text"])))
       |> Enum.map_join("", & &1["text"])
 
     %{question: text}
   end
+
+  # parts가 없거나 형태가 어긋난 메시지는 빈 질문으로 — HTTP 바인딩이 500으로 죽지 않게(graceful).
+  def message_to_input(_message), do: %{question: ""}
 end

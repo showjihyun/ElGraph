@@ -56,7 +56,7 @@ defmodule ElGraph.Checkpointer.Dets do
   def get(%{table: table}, thread_id, :latest) do
     case steps(table, thread_id) do
       [] -> :not_found
-      list -> {:ok, fetch!(table, thread_id, Enum.max(list))}
+      list -> fetch(table, thread_id, Enum.max(list))
     end
   end
 
@@ -88,7 +88,13 @@ defmodule ElGraph.Checkpointer.Dets do
     table
     |> steps(thread_id)
     |> Enum.sort()
-    |> Enum.map(fn step -> %{step: step, version: fetch!(table, thread_id, step).version} end)
+    # 동시 prune이 steps 조회 후 지운 step은 건너뛴다(크래시 방지).
+    |> Enum.flat_map(fn step ->
+      case fetch(table, thread_id, step) do
+        {:ok, cp} -> [%{step: step, version: cp.version}]
+        :not_found -> []
+      end
+    end)
   end
 
   # DETS는 ordered_set이 없으므로 thread의 step을 모아 Elixir에서 정렬한다.
@@ -96,9 +102,11 @@ defmodule ElGraph.Checkpointer.Dets do
     table |> :dets.match({{:cp, thread_id, :"$1"}, :_}) |> List.flatten()
   end
 
-  defp fetch!(table, thread_id, step) do
-    [{_key, checkpoint}] = :dets.lookup(table, {:cp, thread_id, step})
-    checkpoint
+  defp fetch(table, thread_id, step) do
+    case :dets.lookup(table, {:cp, thread_id, step}) do
+      [{_key, checkpoint}] -> {:ok, checkpoint}
+      [] -> :not_found
+    end
   end
 
   defp prune(%{keep: :all}, _thread_id), do: :ok

@@ -50,7 +50,8 @@ defmodule ElGraph.Nodes.Memory do
   def record(state, _ctx, {memory, ns, opts}) do
     case extract_event(state, opts) do
       nil -> %{}
-      event -> :ok = Memory.record_episode(memory, ns, event)
+      # 직렬화 불가 이벤트면 {:error}가 올 수 있다 — 노드는 크래시 없이 기록을 건너뛴다.
+      event -> Memory.record_episode(memory, ns, event)
     end
 
     %{}

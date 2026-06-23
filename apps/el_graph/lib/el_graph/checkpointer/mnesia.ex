@@ -78,7 +78,7 @@ defmodule ElGraph.Checkpointer.Mnesia do
   def get(%{table: table}, thread_id, :latest) do
     case cp_steps(table, thread_id) do
       [] -> :not_found
-      steps -> {:ok, fetch!(table, thread_id, Enum.max(steps))}
+      steps -> fetch(table, thread_id, Enum.max(steps))
     end
   end
 
@@ -110,7 +110,13 @@ defmodule ElGraph.Checkpointer.Mnesia do
     table
     |> cp_steps(thread_id)
     |> Enum.sort()
-    |> Enum.map(fn step -> %{step: step, version: fetch!(table, thread_id, step).version} end)
+    # 동시 prune이 cp_steps 조회 후 지운 step은 건너뛴다(크래시 방지).
+    |> Enum.flat_map(fn step ->
+      case fetch(table, thread_id, step) do
+        {:ok, cp} -> [%{step: step, version: cp.version}]
+        :not_found -> []
+      end
+    end)
   end
 
   defp cp_steps(table, thread_id) do
@@ -119,9 +125,11 @@ defmodule ElGraph.Checkpointer.Mnesia do
     |> Enum.map(fn {_table, {:cp, _thread_id, step}, _value} -> step end)
   end
 
-  defp fetch!(table, thread_id, step) do
-    [{_table, _key, checkpoint}] = :mnesia.dirty_read(table, {:cp, thread_id, step})
-    checkpoint
+  defp fetch(table, thread_id, step) do
+    case :mnesia.dirty_read(table, {:cp, thread_id, step}) do
+      [{_table, _key, checkpoint}] -> {:ok, checkpoint}
+      [] -> :not_found
+    end
   end
 
   defp prune(%{keep: :all}, _thread_id), do: :ok

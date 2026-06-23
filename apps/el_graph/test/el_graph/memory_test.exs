@@ -218,4 +218,14 @@ defmodule ElGraph.MemoryTest do
       assert {:error, :episodic_not_supported} = Memory.forget(mem, @ns, :episodic, "anything")
     end
   end
+
+  describe "serialization safety" do
+    test "rejects a non-serializable fact value (would corrupt durable backends)", %{mem: mem} do
+      assert {:error, {:not_serializable, _}} = Memory.set_fact(mem, @ns, "owner", self())
+    end
+
+    test "rejects a non-serializable episode", %{mem: mem} do
+      assert {:error, {:not_serializable, _}} = Memory.record_episode(mem, @ns, self())
+    end
+  end
 end
