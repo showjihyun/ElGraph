@@ -27,7 +27,8 @@ defmodule ElGraph.Checkpoint do
           thread_id: String.t(),
           step: non_neg_integer(),
           state: map(),
-          next: [atom()],
+          # 저장 형태는 엔트리 튜플 {key, node, input}; resume은 노드 atom도 받는다(back-compat).
+          next: [atom() | {term(), atom(), term()}],
           interrupted: atom() | nil,
           interrupts: %{atom() => [term()]},
           interrupt_info: %{node: atom(), payload: term()} | nil,

@@ -11,7 +11,8 @@ defmodule ElGraph.Checkpointer do
   @type config :: term()
   @type thread_id :: String.t()
   @type step :: non_neg_integer()
-  @type node_write :: {atom(), map()}
+  # 실행기는 제어 지시를 함께 보존하므로 값은 `map()`(M1 형태) 또는 `{update, control}` 튜플.
+  @type node_write :: {atom(), map() | {map(), term()}}
 
   @doc "체크포인트를 저장한다. 같은 (thread_id, step)은 덮어쓴다."
   @callback put(config(), Checkpoint.t()) :: :ok | {:error, term()}
