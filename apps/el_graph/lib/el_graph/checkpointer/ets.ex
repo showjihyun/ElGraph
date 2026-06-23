@@ -75,8 +75,11 @@ defmodule ElGraph.Checkpointer.ETS do
     # :infinity(atom)는 모든 정수 step보다 크므로 prev가 해당 thread의 최고 step을 준다.
     case :ets.prev(table, {thread_id, :infinity}) do
       {^thread_id, _step} = key ->
-        [{^key, checkpoint}] = :ets.lookup(table, key)
-        {:ok, checkpoint}
+        # 동시 prune이 prev와 lookup 사이에 이 키를 지웠을 수 있다 — 크래시(MatchError) 대신 :not_found.
+        case :ets.lookup(table, key) do
+          [{^key, checkpoint}] -> {:ok, checkpoint}
+          [] -> :not_found
+        end
 
       _other_thread_or_end ->
         :not_found

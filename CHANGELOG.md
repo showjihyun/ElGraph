@@ -3,6 +3,48 @@
 이 프로젝트의 주요 변경 사항. 형식은 [Keep a Changelog](https://keepachangelog.com/),
 버전은 [SemVer](https://semver.org/)를 따른다.
 
+## [Unreleased]
+
+FE/BE 소스 리뷰(다중 SubAgent) 후속 — 발견한 HIGH 항목과 마무리 항목을 전부 TDD로 클로저.
+코드 정본 기준 SPEC 동기화. 기본 스위트(el_graph 593 · el_graph_web 57 · el_trace 51 ·
+el_graph_req_llm 9 · el_graph_otel 3) 통과, 변경 앱 dialyzer 0.
+
+### Security
+
+- **A2A Task IDOR 차단.** `tasks/get`이 호출자 스코프로 제한된다 — Task는 생성한 호출자
+  소유로 저장되고 다른 키로는 조회 불가. Task id는 단조 정수에서 **128비트 난수**
+  (`:crypto.strong_rand_bytes`)로 바뀌어 열거 불가.
+- **상수 시간 토큰 비교.** `ElGraphWeb.Auth`가 API 키를 `Plug.Crypto.secure_compare`로
+  비교한다(`==` 단축평가 타이밍 사이드채널 제거) + 성공 시 호출자별 opaque id 부여.
+- **`TaskStore` 상한.** 무한 증가(메모리 고갈) 방지 — 설정 가능한 최대치(기본 10 000)의
+  FIFO 축출.
+
+### Fixed
+
+- **el_trace 무한 증가 차단.** `Handoff.Collector` 엣지 버퍼 바운드(prepend+상한),
+  `Sessions` 레지스트리 축출(단조 seq), 두 telemetry 핸들러에 catch-all(예상치 못한 메타데이터
+  shape에 raise→영구 detach되던 것 차단), `Timeline.build`가 사라진 체크포인트를 건너뜀.
+- **체크포인터 직렬화 검증 강화.** 5개 어댑터(ETS/DETS/Mnesia/Postgres/Redis)가 `.state`뿐
+  아니라 **체크포인트 전체**(task_cache·interrupt_info 포함)의 직렬화 가능성을 검사 — pid/ref가
+  영속 후 죽은 pid로 부활하던 손상 차단. `ElGraph.Memory` 쓰기도 동일 검증.
+- **체크포인터 동시-prune TOCTOU 내성.** `get(:latest)`/`list`가 `list`와 lookup 사이의 동시
+  prune에 MatchError로 죽지 않고 `:not_found`/건너뜀으로 처리(ETS/DETS/Mnesia).
+- **`ElGraph.LLM.ReqLLM.chat/3` 토털화.** 형태가 어긋난 메시지(알 수 없는 role, 잘못된 tool_call,
+  키 누락)에 크래시하지 않고 `{:error, {:invalid_message, _}}` 반환(네트워크 I/O 전 단락).
+- **`ElGraph.Memory.forget/4` :episodic.** `FunctionClauseError` 대신
+  `{:error, :episodic_not_supported}` 반환.
+- **`ElGraph.A2A.message_to_input/1` 견고화.** `"parts"` 없는/형태 어긋난 메시지에 HTTP 500
+  대신 빈 질문 반환.
+
+### Changed / Docs
+
+- **SPEC 코드 동기화.** `docs/SPEC.md`를 코드 정본에 맞춤 — stale "미구현/잔여" 표기 제거
+  (SSE 스트리밍·el_graph_otel·핸드오프 LiveView 등 완료), 잘못된 API 정정(인터럽트 반환 2-튜플,
+  `MCP.tools/1`, A2A=`el_graph_web`/Plug·Bandit, `use ElGraph.Agent` 콜백, Signal `:id`),
+  미문서 기능 추가(Durability seam, `Ctx.memo`/task_cache, 보안 모델 등). Dialyzer 7개 앱.
+- **타입 정확화.** `Checkpoint.next`(엔트리 튜플), `Checkpointer.node_write`(`{update, control}`)
+  타입을 실제 형태로 보강; `ElGraph.A2A` moduledoc의 패키지명(`el_graph_a2a`→`el_graph_web`) 정정.
+
 ## [0.4.0] — 2026-06-20
 
 적대적 감사(다중 에이전트 차원별 검증)에서 도출한 5개 갭 클로저. 보안 기본값 강화, 성능

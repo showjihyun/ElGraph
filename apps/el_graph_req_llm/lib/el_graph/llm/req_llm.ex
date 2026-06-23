@@ -87,8 +87,12 @@ defmodule ElGraph.LLM.ReqLLM do
         Context.assistant(message[:content] || "")
 
       calls ->
-        tool_calls = Enum.map(calls, fn call -> {call.name, call.args, id: call.id} end)
-        Context.assistant(message[:content] || "", tool_calls: tool_calls)
+        if Enum.all?(calls, &valid_tool_call?/1) do
+          tool_calls = Enum.map(calls, fn call -> {call.name, call.args, id: call.id} end)
+          Context.assistant(message[:content] || "", tool_calls: tool_calls)
+        else
+          {:error, {:invalid_message, message}}
+        end
     end
   end
 
@@ -96,6 +100,9 @@ defmodule ElGraph.LLM.ReqLLM do
     do: Context.tool_result(id, name, content)
 
   defp encode_message(other), do: {:error, {:invalid_message, other}}
+
+  defp valid_tool_call?(%{name: _, args: _, id: _}), do: true
+  defp valid_tool_call?(_), do: false
 
   @doc false
   def encode_tools(nil), do: nil

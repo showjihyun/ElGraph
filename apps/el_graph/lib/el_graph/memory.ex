@@ -38,7 +38,8 @@ defmodule ElGraph.Memory do
   ## episodic — 시간순 로그
 
   @doc "에피소드(이벤트)를 기록한다. `:at`(정렬 키, 기본 단조 증가)."
-  @spec record_episode(t(), namespace(), term(), keyword()) :: :ok
+  @spec record_episode(t(), namespace(), term(), keyword()) ::
+          :ok | {:error, {:not_serializable, term()}}
   def record_episode(%__MODULE__{} = mem, ns, event, opts \\ []) do
     at = Keyword.get_lazy(opts, :at, &mono/0)
     put(mem, scope(ns, "episodic"), key(at), %{value: event, at: at})
@@ -75,7 +76,8 @@ defmodule ElGraph.Memory do
     * `:at` — 정렬/시점 키(기본 단조 증가). `fact_at/4`의 비교 기준.
     * `:on_conflict` — 기존 값이 있을 때의 정책(`t:on_conflict/0`, 기본 `:latest`).
   """
-  @spec set_fact(t(), namespace(), String.t(), term(), keyword()) :: :ok
+  @spec set_fact(t(), namespace(), String.t(), term(), keyword()) ::
+          :ok | {:error, {:not_serializable, term()}}
   def set_fact(%__MODULE__{store: {mod, config}} = mem, ns, subject, value, opts \\ []) do
     at = Keyword.get_lazy(opts, :at, &mono/0)
     on_conflict = Keyword.get(opts, :on_conflict, :latest)
@@ -146,7 +148,7 @@ defmodule ElGraph.Memory do
   ## procedural — 규칙
 
   @doc "규칙/선호를 학습한다."
-  @spec learn(t(), namespace(), String.t(), term()) :: :ok
+  @spec learn(t(), namespace(), String.t(), term()) :: :ok | {:error, {:not_serializable, term()}}
   def learn(%__MODULE__{} = mem, ns, name, rule),
     do: put(mem, scope(ns, "procedural"), name, %{value: rule})
 
@@ -240,7 +242,13 @@ defmodule ElGraph.Memory do
     end
   end
 
-  defp put(%__MODULE__{store: {mod, config}}, ns, key, value), do: mod.put(config, ns, key, value)
+  # 직렬화 불가능한 값(pid/ref/port/로컬 fun)은 durable Store(Postgres/Redis)에서 영속 후 재시작
+  # 시 깨지므로 쓰기 전에 거부한다(체크포인트와 동일한 보장). 모든 Memory 쓰기가 이곳을 지난다.
+  defp put(%__MODULE__{store: {mod, config}}, ns, key, value) do
+    with :ok <- ElGraph.Checkpoint.validate_serializable(value) do
+      mod.put(config, ns, key, value)
+    end
+  end
 
   defp list(%__MODULE__{store: {mod, config}}, ns) do
     config |> mod.list(ns) |> Enum.map(fn {_key, entry} -> entry end)

@@ -5,6 +5,13 @@ defmodule ElGraph.A2ATest do
 
   doctest ElGraph.A2A
 
+  describe "message_to_input/1 — 견고성" do
+    test "a message without \"parts\" yields an empty question (no crash)" do
+      assert %{question: ""} = A2A.message_to_input(%{})
+      assert %{question: ""} = A2A.message_to_input(%{"role" => "user"})
+    end
+  end
+
   describe "to_task_state/1 — Task 생명주기 매핑 (SPEC §6)" do
     test "{:ok, state} maps to COMPLETED with the final state" do
       assert %{state: "completed", result: %{answer: "done"}} =

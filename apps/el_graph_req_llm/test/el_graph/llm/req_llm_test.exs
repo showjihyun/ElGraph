@@ -35,6 +35,11 @@ defmodule ElGraph.LLM.ReqLLMTest do
       assert {:error, {:invalid_message, %{role: :bogus}}} =
                Adapter.chat([model: "openai:gpt-4o"], [%{role: :bogus}], [])
     end
+
+    test "a malformed assistant tool_call → {:error, {:invalid_message, _}}, not a KeyError" do
+      msg = %{role: :assistant, content: nil, tool_calls: [%{}]}
+      assert {:error, {:invalid_message, ^msg}} = Adapter.encode_context([msg], [])
+    end
   end
 
   describe "encode_tools/1" do
