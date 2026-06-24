@@ -48,6 +48,19 @@ defmodule ElTraceWeb.TimelineLiveTest do
       assert html =~ "여기서 분기"
     end
 
+    test "the threads sidebar shows each thread's status badge + step", %{
+      conn: conn,
+      cp: cp,
+      table: table
+    } do
+      seed_interrupt(cp, table, "t-status")
+
+      {:ok, _lv, html} = live(conn, ~p"/")
+
+      assert html =~ "⏸ paused"
+      assert html =~ "step 1"
+    end
+
     test "a non-integer branch step is ignored, not a crash", %{conn: conn, cp: cp, table: table} do
       seed_interrupt(cp, table, "t-badstep")
 

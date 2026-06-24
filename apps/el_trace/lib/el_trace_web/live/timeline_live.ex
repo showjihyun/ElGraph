@@ -20,7 +20,14 @@ defmodule ElTraceWeb.TimelineLive do
 
     socket =
       socket
-      |> assign(table: table, selected: nil, events: [], page_title: "ElTrace")
+      |> assign(
+        table: table,
+        selected: nil,
+        events: [],
+        page_title: "ElTrace",
+        active_page: :timeline,
+        connected: connected?(socket)
+      )
       |> load_sessions()
 
     {:ok, socket}
@@ -116,7 +123,31 @@ defmodule ElTraceWeb.TimelineLive do
     socket |> assign(:selected, tid) |> load_timeline()
   end
 
-  defp load_sessions(socket), do: assign(socket, :sessions, Sessions.list(socket.assigns.table))
+  defp load_sessions(socket) do
+    sessions =
+      socket.assigns.table
+      |> Sessions.list()
+      |> Enum.map(&Map.merge(&1, session_meta(&1)))
+
+    assign(socket, :sessions, sessions)
+  end
+
+  # 목록에 상태/최신 step을 곁들인다 — 클릭 없이도 멈춤(interrupt)·완료(done)를 알 수 있게.
+  defp session_meta(%{checkpointer: {mod, config}, thread_id: tid}) do
+    case mod.get(config, tid, :latest) do
+      {:ok, %{next: [], step: step}} ->
+        %{status: :done, step: step}
+
+      {:ok, %{interrupt_info: info, step: step}} when not is_nil(info) ->
+        %{status: :interrupted, step: step}
+
+      {:ok, %{step: step}} ->
+        %{status: :running, step: step}
+
+      :not_found ->
+        %{status: :empty, step: nil}
+    end
+  end
 
   defp load_timeline(socket) do
     case Sessions.get(socket.assigns.table, socket.assigns.selected) do
@@ -128,29 +159,43 @@ defmodule ElTraceWeb.TimelineLive do
     end
   end
 
-  defp kind_label(:start), do: "start"
-  defp kind_label(:step), do: "step"
+  defp kind_label(:start), do: "● start"
+  defp kind_label(:step), do: "→ step"
   defp kind_label(:interrupt), do: "⏸ interrupt"
   defp kind_label(:done), do: "✓ done"
+
+  defp status_label(:interrupted), do: "⏸ paused"
+  defp status_label(:done), do: "✓ done"
+  defp status_label(:running), do: "running"
+  defp status_label(:empty), do: "—"
 
   @impl true
   def render(assigns) do
     ~H"""
-    <h1 class="title">ElTrace</h1>
     <p class="subtitle">체크포인트 타임라인 · 승인/거절 · 여기서 분기</p>
 
     <div class="layout">
       <aside class="sessions">
         <h2>Threads</h2>
-        <p :if={@sessions == []} class="empty">등록된 실행이 없습니다.</p>
+        <p :if={@sessions == []} class="empty">
+          <span class="empty-icon">📭</span>등록된 실행이 없습니다.<br />
+          <code>ElTrace.observe/4</code>로 thread를 등록하세요.
+        </p>
         <button
           :for={s <- @sessions}
           class={["session", s.thread_id == @selected && "active"]}
           phx-click="select"
           phx-value-thread={s.thread_id}
         >
-          <div class="tid"><%= s.thread_id %></div>
-          <div :if={s.parent} class="fork">⑂ from <%= s.parent %></div>
+          <div class="tid-row">
+            <span class={["status-dot", to_string(s.status)]} title={status_label(s.status)}></span>
+            <span class="tid"><%= s.thread_id %></span>
+          </div>
+          <div class="meta">
+            <span :if={s.step} class="step-badge">step <%= s.step %></span>
+            <span class={["status-badge", to_string(s.status)]}><%= status_label(s.status) %></span>
+            <span :if={s.parent} class="fork">⑂ from <%= s.parent %></span>
+          </div>
         </button>
       </aside>
 
@@ -165,19 +210,27 @@ defmodule ElTraceWeb.TimelineLive do
               <span :if={e[:node]} class="node">@<%= e.node %></span>
               <span :if={e[:next]} class="next">→ <%= inspect(e.next) %></span>
             </div>
-            <pre :if={e[:payload]} class="payload"><%= inspect(e.payload, pretty: true) %></pre>
+            <%= if e[:payload] do %>
+              <div class="payload-label">Payload</div>
+              <pre class="payload"><%= inspect(e.payload, pretty: true) %></pre>
+            <% end %>
             <div class="actions">
               <%= if e.kind == :interrupt do %>
-                <button class="btn btn-approve" phx-click="approve">승인</button>
-                <button class="btn btn-reject" phx-click="reject">거절</button>
+                <button class="btn btn-approve" phx-click="approve" phx-disable-with="처리 중…">승인</button>
+                <button class="btn btn-reject" phx-click="reject" phx-disable-with="처리 중…">거절</button>
               <% end %>
-              <button class="btn btn-branch small" phx-click="branch" phx-value-step={e.step}>
+              <button
+                class="btn btn-branch small"
+                phx-click="branch"
+                phx-value-step={e.step}
+                phx-disable-with="분기 중…"
+              >
                 여기서 분기
               </button>
             </div>
           </div>
         <% else %>
-          <p class="empty">왼쪽에서 thread를 선택하세요.</p>
+          <p class="empty"><span class="empty-icon">👈</span>왼쪽에서 thread를 선택하세요.</p>
         <% end %>
       </section>
     </div>

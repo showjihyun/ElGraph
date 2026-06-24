@@ -17,7 +17,14 @@ defmodule ElTraceWeb.HandoffLive do
   def mount(_params, _session, socket) do
     if connected?(socket), do: schedule_refresh()
 
-    {:ok, socket |> assign(:page_title, "ElTrace — Handoff") |> load_graph()}
+    {:ok,
+     socket
+     |> assign(
+       page_title: "ElTrace — Handoff",
+       active_page: :handoff,
+       connected: connected?(socket)
+     )
+     |> load_graph()}
   end
 
   @impl true
@@ -46,10 +53,12 @@ defmodule ElTraceWeb.HandoffLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <h1 class="title">ElTrace — Handoff</h1>
-    <p class="subtitle">멀티 에이전트 핸드오프 그래프 · 에이전트 <%= length(@nodes) %> · 핸드오프 <%= length(@edges) %></p>
+    <p class="subtitle">
+      멀티 에이전트 핸드오프 그래프 · 에이전트 <%= length(@nodes) %> · 핸드오프 <%= length(@edges) %>
+      <span style="color: var(--muted)"> · 2초마다 자동 갱신</span>
+    </p>
 
-    <button class="btn" phx-click="refresh">Refresh</button>
+    <button class="btn" phx-click="refresh">↻ Refresh</button>
 
     <%!-- viz.js(클라이언트 Graphviz)가 있으면 DOT을 SVG로 렌더해 #handoff-server-svg를 숨긴다.
          없으면 아래 서버사이드 SVG가 그대로 보인다(JS/외부 의존 0 폴백). --%>
@@ -76,10 +85,14 @@ defmodule ElTraceWeb.HandoffLive do
       </tbody>
     </table>
 
-    <p :if={@edges == []} class="empty">아직 핸드오프가 없습니다.</p>
+    <p :if={@edges == []} class="empty">
+      <span class="empty-icon">🕸️</span>아직 핸드오프가 없습니다.
+    </p>
 
-    <h2>Graphviz DOT</h2>
-    <pre class="dot"><%= @dot %></pre>
+    <details class="dot-source">
+      <summary>Graphviz DOT 소스</summary>
+      <pre class="dot"><%= @dot %></pre>
+    </details>
     """
   end
 end
