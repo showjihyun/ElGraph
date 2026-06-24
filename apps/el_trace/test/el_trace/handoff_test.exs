@@ -34,6 +34,13 @@ defmodule ElTrace.HandoffTest do
     assert dot =~ "}"
   end
 
+  test "to_dot escapes quotes in node/signal names (no DOT injection/breakage)" do
+    dot = Handoff.to_dot(Handoff.build([%{from: ~s(a"x), to: "b", signal: ~s(say "hi")}]))
+
+    assert dot =~ ~S(a\"x)
+    assert dot =~ ~S(\"hi\")
+  end
+
   test "render produces text edge lines" do
     graph =
       Handoff.build([

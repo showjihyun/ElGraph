@@ -53,14 +53,22 @@ defmodule ElTrace do
 
   `source_thread`가 등록돼 있지 않으면 `:error`.
   """
-  @spec fork(String.t(), non_neg_integer(), keyword()) :: {:ok, String.t(), term()} | :error
+  @spec fork(String.t(), non_neg_integer(), keyword()) ::
+          {:ok, String.t(), term()} | {:error, term()} | :error
   def fork(source_thread, from_step, opts \\ []) do
     case Sessions.get(table(), source_thread) do
       {:ok, %{graph: graph, checkpointer: cp}} ->
         fork_id = Keyword.get(opts, :as, "#{source_thread}-fork-#{from_step}")
-        result = Replay.from(cp, source_thread, from_step, graph, as: fork_id)
-        Sessions.register(table(), fork_id, graph, cp, parent: source_thread)
-        {:ok, fork_id, result}
+
+        # 분기가 실패하면(예: 해당 step에 체크포인트 없음) 세션을 등록하지 않고 에러를 그대로 반환한다.
+        case Replay.from(cp, source_thread, from_step, graph, as: fork_id) do
+          {:error, _reason} = error ->
+            error
+
+          result ->
+            Sessions.register(table(), fork_id, graph, cp, parent: source_thread)
+            {:ok, fork_id, result}
+        end
 
       :error ->
         :error
