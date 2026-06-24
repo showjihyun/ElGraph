@@ -169,6 +169,12 @@ defmodule ElTraceWeb.TimelineLive do
   defp status_label(:running), do: "running"
   defp status_label(:empty), do: "—"
 
+  # 체크포인트 생성 시각(ms) → HH:MM:SS (UTC). 구버전 체크포인트(nil)는 표시 안 함.
+  defp format_time(nil), do: nil
+
+  defp format_time(ms) when is_integer(ms),
+    do: ms |> DateTime.from_unix!(:millisecond) |> Calendar.strftime("%H:%M:%S")
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -209,6 +215,7 @@ defmodule ElTraceWeb.TimelineLive do
               <span class="kind"><%= kind_label(e.kind) %></span>
               <span :if={e[:node]} class="node">@<%= e.node %></span>
               <span :if={e[:next]} class="next">→ <%= inspect(e.next) %></span>
+              <span :if={e[:at]} class="time" title="UTC"><%= format_time(e.at) %></span>
             </div>
             <%= if e[:payload] do %>
               <div class="payload-label">Payload</div>

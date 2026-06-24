@@ -30,13 +30,17 @@ defmodule ElTrace.Timeline do
     end)
   end
 
+  # 체크포인트 생성 시각(ms)을 이벤트에 곁들인다 — 구버전 체크포인트는 nil.
+  defp to_event(%Checkpoint{created_at: at} = checkpoint),
+    do: Map.put(classify(checkpoint), :at, at)
+
   # 인터럽트 기록(interrupt_info)이 다른 분류보다 우선 — 재개 후에도 "여기서 멈췄다"를 보여준다.
-  defp to_event(%Checkpoint{step: step, interrupt_info: %{node: node, payload: payload}}),
+  defp classify(%Checkpoint{step: step, interrupt_info: %{node: node, payload: payload}}),
     do: %{step: step, kind: :interrupt, node: node, payload: payload}
 
-  defp to_event(%Checkpoint{step: step, next: []}), do: %{step: step, kind: :done}
-  defp to_event(%Checkpoint{step: 0, next: next}), do: %{step: 0, kind: :start, next: next}
-  defp to_event(%Checkpoint{step: step, next: next}), do: %{step: step, kind: :step, next: next}
+  defp classify(%Checkpoint{step: step, next: []}), do: %{step: step, kind: :done}
+  defp classify(%Checkpoint{step: 0, next: next}), do: %{step: 0, kind: :start, next: next}
+  defp classify(%Checkpoint{step: step, next: next}), do: %{step: step, kind: :step, next: next}
 
   @doc "타임라인 이벤트를 사람이 읽는 텍스트로 렌더링한다."
   @spec render([event()]) :: String.t()

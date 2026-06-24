@@ -538,7 +538,8 @@ defmodule ElGraph.Executor do
       # 재개 후에도 보존되는 인터럽트 발생 기록 (ElTrace #1).
       interrupt_info: %{node: node, payload: payload},
       # 인터럽트 전 memo된 결과를 보존 → 재개 시 노드 재실행에도 재계산 안 함.
-      task_cache: dump_cache(meta)
+      task_cache: dump_cache(meta),
+      created_at: System.system_time(:millisecond)
     }
 
     case Durability.put_now(meta.durability, checkpoint) do
@@ -571,7 +572,8 @@ defmodule ElGraph.Executor do
       step: step,
       state: state,
       next: next,
-      task_cache: dump_cache(meta)
+      task_cache: dump_cache(meta),
+      created_at: System.system_time(:millisecond)
     }
 
   defp pending_writes(%{checkpointer: nil}, _step), do: %{}
