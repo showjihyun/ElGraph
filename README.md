@@ -40,13 +40,13 @@ user input ─▶ [run graph] ─▶ checkpoint after every step
 
 1. **Declare your LLM agent as a graph** → ElGraph runs it on top of checkpoints.
 2. **Pause (HITL), rewind (time-travel), resume after a crash** — durable execution, opt-in with one line (pass a checkpointer).
-3. **No Python, no external infra** — the BEAM runtime gives you concurrency, fault recovery, and real-time for free (the only core runtime dependency is `:telemetry`).
+3. **No Python, no external infra** — the BEAM runtime gives you concurrency, fault recovery, and real-time for free (core deps are a handful of ubiquitous Elixir libs — `:telemetry`, `:req`, `:jason`, `:nimble_options`, `:opentelemetry_api` — no heavy frameworks).
 
 > One line: *what LangGraph had to laboriously reimplement as a library in Python is a runtime built-in on the BEAM.*
 
 ## ✨ Highlights
 
-- **Graph core** — state channels/reducers, conditional edges, parallel fan-out, subgraphs. Only one runtime dependency: `:telemetry`.
+- **Graph core** — state channels/reducers, conditional edges, parallel fan-out, subgraphs. Minimal runtime deps (`:telemetry` + a few ubiquitous libs: `:req`/`:jason`/`:nimble_options`/`:opentelemetry_api`); the heavy OTel SDK is isolated in the optional `el_graph_otel` app.
 - **Durable execution** — checkpoint → resume. A partially failed parallel step preserves the work that succeeded, and `Ctx.memo/3` **task memoization** skips re-running LLM/tool calls on resume or retry. Swappable backends: **ETS** (in-memory) · **DETS·Mnesia** (BEAM built-in, zero-infra disk persistence) · **Postgres** · **Valkey/Redis** — all support `keep: {:last, n}` retention.
 - **Human-in-the-loop (HITL)** — pause before or inside a node, take a human's answer, and continue from that exact point.
 - **Time-travel** — fork a new thread from any past checkpoint. The original is preserved.
@@ -247,8 +247,14 @@ ElTrace shows every run live. *(Honest note: for I/O-bound LLM waits the win isn
 isolation, durability, and cheap long-lived sessions.)*
 
 ```elixir
-# A supervisor agent routes to specialist workers, each its own BEAM process.
-team = ElGraph.Orchestration.supervisor(llm, [researcher, coder, support], max_steps: 16)
+# A supervisor LLM routes to specialist workers (each is a map: name + description + run fn).
+workers = [
+  %{name: :researcher, description: "Finds sources", run: &MyApp.research/2},
+  %{name: :coder, description: "Writes code", run: &MyApp.code/2},
+  %{name: :support, description: "Answers users", run: &MyApp.support/2}
+]
+
+team = ElGraph.Orchestration.supervisor({ElGraph.LLM.OpenAI, api_key: key}, workers, max_steps: 16)
 
 # Fan out thousands of independent, long-lived per-user agents. The scheduler uses all cores,
 # and a crash or runaway loop in one run is fully isolated — the others keep going.
@@ -287,7 +293,7 @@ team = ElGraph.Orchestration.supervisor(llm, [researcher, coder, support], max_s
 | HITL · time-travel | ✖ | ✔ HITL / partial rewind | ✔ HITL **+ fork from a past point** |
 | Fault isolation·self-healing | app code + external infra | app code + external infra | **Supervisor·process isolation (language standard)** |
 | Concurrency | GIL-bound | GIL-bound | **all cores·isolated lightweight processes** |
-| Dependencies·deploy | many transitive deps | many transitive deps | **effectively zero** core deps (`:telemetry` only)·single release |
+| Dependencies·deploy | many transitive deps | many transitive deps | **minimal** core deps (a handful of ubiquitous libs)·single release |
 | Real-time UI | bolt-on | bolt-on | **same LiveView model** (ElTrace·zero infra) |
 
 An agent orchestrator is ultimately a problem of **"many concurrent I/O waits + state
@@ -304,7 +310,7 @@ runtime) has been solving in telecom switches for 30 years.
 | **State safety** | mutable dicts (docs warn you to "copy before use") | everything immutable | ✅ parallel-branch data races are **impossible by language** |
 | **Real-time UI** | FastAPI + SSE/WebSocket wired up separately | same message model as Phoenix LiveView | ✅ agent events → browser with **zero extra infra** (ElTrace is the proof) |
 | **Distribution / scale-out** | requires Redis/RabbitMQ/Kafka + Celery | distributed Erlang + `:pg` built in | ✅ handoffs across node boundaries are nearly identical code |
-| **Deploy / supply chain** | dozens of transitive deps, hundreds of MB images | core has **zero external deps**, `mix release` single binary | ✅ drastically smaller supply-chain surface and image size |
+| **Deploy / supply chain** | dozens of transitive deps, hundreds of MB images | core has **few, ubiquitous deps** (no heavy frameworks), `mix release` single binary | ✅ much smaller supply-chain surface and image size |
 
 ### Honestly — where LangGraph is better
 
@@ -362,7 +368,7 @@ ElGraph's combination: **per-step versioned checkpoints + pending writes + inter
 ```
 ElGraph/                  # umbrella root (run mix test / mix format here)
 ├─ apps/
-│  ├─ el_graph/           # core runtime — graph, checkpoints, agents, LLM/MCP (zero deps)
+│  ├─ el_graph/           # core runtime — graph, checkpoints, agents, LLM/MCP (minimal deps)
 │  ├─ el_graph_web/       # A2A (JSON-RPC) · AG-UI (SSE) HTTP server — Plug/Bandit
 │  ├─ el_trace/           # observability UI — Phoenix/LiveView (depends on el_graph)
 │  ├─ el_graph_ecto/      # durable checkpointer — Postgres (Ecto)
