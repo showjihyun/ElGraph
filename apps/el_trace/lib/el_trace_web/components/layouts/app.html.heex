@@ -1,3 +1,14 @@
+<header class="appbar">
+  <div class="brand"><span class="logo"></span> ElTrace</div>
+  <nav>
+    <.link navigate={~p"/"} class={if assigns[:active_page] == :timeline, do: "active"}>Timeline</.link>
+    <.link navigate={~p"/handoff"} class={if assigns[:active_page] == :handoff, do: "active"}>Handoff</.link>
+  </nav>
+  <div class={["live", assigns[:connected] && "on"]}>
+    <span class="dot"></span><%= if assigns[:connected], do: "실시간", else: "연결 중…" %>
+  </div>
+</header>
+
 <main class="page">
   <p :if={Phoenix.Flash.get(@flash, :info)} class="flash flash-info" role="alert">
     <%= Phoenix.Flash.get(@flash, :info) %>
