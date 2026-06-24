@@ -76,5 +76,10 @@ defmodule ElTraceTest do
     test "unknown source returns :error" do
       assert :error = ElTrace.fork("missing", 1)
     end
+
+    test "fork from a non-existent step returns an error and registers no junk session" do
+      assert {:error, {:no_checkpoint, "src", 999}} = ElTrace.fork("src", 999, as: "src-bad")
+      assert :error = ElTrace.Sessions.get(ElTrace.Sessions.table(ElTrace.Sessions), "src-bad")
+    end
   end
 end

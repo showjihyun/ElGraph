@@ -36,7 +36,7 @@ defmodule ElTrace.Handoff do
   def to_dot(%{edges: edges}) do
     lines =
       Enum.map_join(edges, "\n", fn %{from: from, to: to, signal: signal} ->
-        ~s(  "#{from}" -> "#{to}" [label="#{signal}"];)
+        ~s(  "#{dot_escape(from)}" -> "#{dot_escape(to)}" [label="#{dot_escape(signal)}"];)
       end)
 
     "digraph handoff {\n" <> lines <> "\n}"
@@ -133,5 +133,13 @@ defmodule ElTrace.Handoff do
     |> String.replace("<", "&lt;")
     |> String.replace(">", "&gt;")
     |> String.replace("\"", "&quot;")
+  end
+
+  # DOT 문자열 이스케이프 — 역슬래시·큰따옴표(SVG의 escape/1과 달리 HTML 엔티티가 아니라 DOT 규칙).
+  defp dot_escape(text) do
+    text
+    |> to_string()
+    |> String.replace("\\", "\\\\")
+    |> String.replace("\"", "\\\"")
   end
 end

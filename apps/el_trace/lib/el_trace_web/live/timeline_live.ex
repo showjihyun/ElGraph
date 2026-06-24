@@ -37,23 +37,28 @@ defmodule ElTraceWeb.TimelineLive do
   def handle_event("branch", %{"step" => step}, socket) do
     tid = socket.assigns.selected
 
-    case Sessions.get(socket.assigns.table, tid) do
-      {:ok, %{graph: graph, checkpointer: cp}} ->
-        step = String.to_integer(step)
-        fork = "#{tid}-fork-#{step}"
-        table = socket.assigns.table
+    # step은 클라이언트가 보내는 값 — 정수 파싱 실패/세션 없음이면 조용히 무시한다(크래시 금지).
+    with {step, ""} <- Integer.parse(step),
+         {:ok, %{graph: graph, checkpointer: cp}} <- Sessions.get(socket.assigns.table, tid) do
+      fork = "#{tid}-fork-#{step}"
+      table = socket.assigns.table
 
-        socket =
-          start_async(socket, {:branch, fork}, fn ->
-            result = Replay.from(cp, tid, step, graph, as: fork)
-            Sessions.register(table, fork, graph, cp, parent: tid)
-            result
-          end)
+      socket =
+        start_async(socket, {:branch, fork}, fn ->
+          # 분기 실패 시 junk 세션을 등록하지 않는다.
+          case Replay.from(cp, tid, step, graph, as: fork) do
+            {:error, _reason} = error ->
+              error
 
-        {:noreply, socket}
+            result ->
+              Sessions.register(table, fork, graph, cp, parent: tid)
+              result
+          end
+        end)
 
-      :error ->
-        {:noreply, socket}
+      {:noreply, socket}
+    else
+      _ -> {:noreply, socket}
     end
   end
 
@@ -64,6 +69,10 @@ defmodule ElTraceWeb.TimelineLive do
 
   def handle_async({:resume, _tid}, {:exit, reason}, socket) do
     {:noreply, put_flash(socket, :error, "resume 실패: #{inspect(reason)}")}
+  end
+
+  def handle_async({:branch, _fork}, {:ok, {:error, reason}}, socket) do
+    {:noreply, put_flash(socket, :error, "분기 실패: #{inspect(reason)}")}
   end
 
   def handle_async({:branch, _fork}, {:ok, _result}, socket) do

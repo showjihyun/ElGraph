@@ -47,6 +47,19 @@ defmodule ElTraceWeb.TimelineLiveTest do
       assert html =~ "거절"
       assert html =~ "여기서 분기"
     end
+
+    test "a non-integer branch step is ignored, not a crash", %{conn: conn, cp: cp, table: table} do
+      seed_interrupt(cp, table, "t-badstep")
+
+      {:ok, lv, _} = live(conn, ~p"/")
+      render_hook(lv, "select", %{"thread" => "t-badstep"})
+
+      # 위조된 클라이언트 파라미터 — 무시돼야 하고 LiveView를 죽이면 안 된다.
+      render_hook(lv, "branch", %{"step" => "not-a-number"})
+
+      assert Process.alive?(lv.pid)
+      assert render(lv) =~ "ElTrace"
+    end
   end
 
   describe "승인/거절 (resume)" do
