@@ -40,13 +40,13 @@ LLM 에이전트를 **상태 채널 + 노드 + 엣지**로 선언하면, ElGraph
 
 1. **LLM 에이전트를 그래프로 선언** → ElGraph가 체크포인트 기반으로 실행한다.
 2. **멈추고(HITL)·되감고(time-travel)·죽어도 재개**한다 — 체크포인터 한 줄로 켜는 내구 실행(opt-in).
-3. **Python·외부 인프라 없이** BEAM 런타임이 동시성·장애복구·실시간을 공짜로 준다 (코어 런타임 의존성은 `:telemetry` 하나).
+3. **Python·외부 인프라 없이** BEAM 런타임이 동시성·장애복구·실시간을 공짜로 준다 (코어 의존성은 흔한 Elixir 라이브러리 몇 개 — `:telemetry`·`:req`·`:jason`·`:nimble_options`·`:opentelemetry_api` — 무거운 프레임워크 없음).
 
 > 한 줄: *LangGraph가 Python에서 라이브러리로 힘겹게 재구현한 것이, BEAM에선 런타임 기본이다.*
 
 ## ✨ 핵심 특징
 
-- **그래프 코어** — 상태 채널/reducer, 조건부 엣지, 병렬 fan-out, 서브그래프. 런타임 의존성은 `:telemetry` 하나.
+- **그래프 코어** — 상태 채널/reducer, 조건부 엣지, 병렬 fan-out, 서브그래프. 런타임 의존성 최소(`:telemetry` + 흔한 라이브러리 `:req`/`:jason`/`:nimble_options`/`:opentelemetry_api`); 무거운 OTel SDK는 선택 앱 `el_graph_otel`에 격리.
 - **내구 실행** — 체크포인트 저장 → 재개. 부분 실패한 병렬 단계도 성공한 작업을 보존하고, `Ctx.memo/3` **task 메모이제이션**으로 재개·재시도 시 LLM/툴 호출을 재실행하지 않는다. 백엔드 교체 가능: **ETS**(인메모리) · **DETS·Mnesia**(BEAM 내장·무인프라 디스크 영속) · **Postgres** · **Valkey/Redis**. 전부 `keep: {:last, n}` 보존정책 지원.
 - **사람 개입(HITL)** — 노드 앞이나 노드 안에서 멈춰 사람의 답을 받고 그 지점부터 이어간다.
 - **time-travel** — 임의 과거 체크포인트에서 새 thread로 분기. 원본은 보존된다.
@@ -242,8 +242,14 @@ ElGraph.invoke(graph, %{topic: "..."}, checkpointer: cp, thread_id: "job-42")
 내구·값싼 장수명 세션이다.)*
 
 ```elixir
-# 슈퍼바이저 에이전트가 전문 워커(각자 자기 BEAM 프로세스)로 라우팅한다.
-team = ElGraph.Orchestration.supervisor(llm, [researcher, coder, support], max_steps: 16)
+# 슈퍼바이저 LLM이 전문 워커(각각 name + description + run 함수를 가진 맵)로 라우팅한다.
+workers = [
+  %{name: :researcher, description: "자료 조사", run: &MyApp.research/2},
+  %{name: :coder, description: "코드 작성", run: &MyApp.code/2},
+  %{name: :support, description: "사용자 응대", run: &MyApp.support/2}
+]
+
+team = ElGraph.Orchestration.supervisor({ElGraph.LLM.OpenAI, api_key: key}, workers, max_steps: 16)
 
 # 독립적인 장수명 사용자별 에이전트를 수천 개 팬아웃. 스케줄러가 모든 코어를 쓰고,
 # 한 실행의 크래시·폭주는 완전히 격리된다 — 나머지는 계속 돈다.
@@ -281,7 +287,7 @@ team = ElGraph.Orchestration.supervisor(llm, [researcher, coder, support], max_s
 | HITL · time-travel | ✖ | ✔ HITL / 되감기 일부 | ✔ HITL **+ 과거 시점 분기(fork)** |
 | 장애 격리·자기치유 | 앱코드 + 외부 인프라 | 앱코드 + 외부 인프라 | **Supervisor·프로세스 격리(언어 표준)** |
 | 동시성 | GIL 제약 | GIL 제약 | **전 코어·격리된 경량 프로세스** |
-| 의존성·배포 | 전이 의존성 다수 | 전이 의존성 다수 | 코어 의존성 **사실상 0**(`:telemetry`만)·단일 릴리스 |
+| 의존성·배포 | 전이 의존성 다수 | 전이 의존성 다수 | 코어 의존성 **최소**(흔한 라이브러리 몇 개)·단일 릴리스 |
 | 실시간 UI | 별도 구성 | 별도 구성 | **LiveView 동일 모델**(ElTrace·인프라 0) |
 
 에이전트 오케스트레이터는 결국 **"수많은 동시 I/O 대기 + 상태 관리 + 장애 복구"** 문제다.
@@ -297,7 +303,7 @@ team = ElGraph.Orchestration.supervisor(llm, [researcher, coder, support], max_s
 | **상태 안전성** | 가변 dict ("복사해서 쓰라"고 문서가 경고) | 모든 데이터 불변 | ✅ 병렬 브랜치 데이터 레이스가 **언어적으로 불가능** |
 | **실시간 UI** | FastAPI + SSE/WebSocket 별도 구성 | Phoenix LiveView와 메시지 모델 동일 | ✅ 에이전트 이벤트 → 브라우저가 **추가 인프라 0** (← ElTrace가 그 증거) |
 | **분산/스케일아웃** | Redis/RabbitMQ/Kafka + Celery 필수 | distributed Erlang + `:pg` 내장 | ✅ 노드 경계를 넘는 핸드오프도 코드 거의 동일 |
-| **배포·공급망** | 전이 의존성 수십 개, 이미지 수백 MB | 코어 **외부 의존성 0**, `mix release` 단일 바이너리 | ✅ 공급망 표면적·이미지 크기 대폭 감소 |
+| **배포·공급망** | 전이 의존성 수십 개, 이미지 수백 MB | 코어 **의존성 소수**(무거운 프레임워크 없음), `mix release` 단일 바이너리 | ✅ 공급망 표면적·이미지 크기 대폭 감소 |
 
 ### 정직하게 — LangGraph가 더 나은 곳
 
@@ -345,7 +351,7 @@ ElGraph만의 조합: **노드 단위 버전 체크포인트 + pending writes + 
 ```
 ElGraph/                  # 우산 루트 (여기서 mix test / mix format)
 ├─ apps/
-│  ├─ el_graph/           # 코어 런타임 — 그래프·체크포인트·에이전트·LLM/MCP (의존성 0)
+│  ├─ el_graph/           # 코어 런타임 — 그래프·체크포인트·에이전트·LLM/MCP (의존성 최소)
 │  ├─ el_graph_web/       # A2A(JSON-RPC)·AG-UI(SSE) HTTP 서버 — Plug/Bandit
 │  ├─ el_trace/           # 관측 UI — Phoenix/LiveView (el_graph에 의존)
 │  ├─ el_graph_ecto/      # 내구 체크포인터 — Postgres (Ecto)
