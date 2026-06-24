@@ -136,7 +136,7 @@ end
 `Checkpoint.step`은 "다음에 실행할 superstep"을 뜻하고 `next: []`가 완료를 뜻한다.
 어댑터 적합성은 공유 계약 테스트(`ElGraph.CheckpointerContract`)로 검증한다 — 새 어댑터(Postgres 등)는 `use`만 하면 동일 계약을 통과해야 한다.
 
-실제 저장 형태(코드 정본): `Checkpoint`는 `version·thread_id·step·state·next·interrupted·interrupts·interrupt_info·task_cache` 필드를 가지며 **구조체 전체**가 직렬화된다(따라서 `validate_serializable`는 state뿐 아니라 전체를 검사). `next`는 노드 atom이 아니라 엔트리 튜플 `{key, node, input}` 리스트. pending writes는 `{node, {update, control}}` 형태(제어 지시 포함)로 저장된다. `task_cache`는 `Ctx.memo/3`의 메모이즈 결과로, 재시도·재개로 노드가 재실행돼도 부수효과(LLM/툴)를 다시 돌리지 않게 체크포인트에 함께 영속된다.
+실제 저장 형태(코드 정본): `Checkpoint`는 `version·thread_id·step·state·next·interrupted·interrupts·interrupt_info·task_cache·created_at`(생성 ms epoch, ElTrace 타임라인 시각용) 필드를 가지며 **구조체 전체**가 직렬화된다(따라서 `validate_serializable`는 state뿐 아니라 전체를 검사). `next`는 노드 atom이 아니라 엔트리 튜플 `{key, node, input}` 리스트. pending writes는 `{node, {update, control}}` 형태(제어 지시 포함)로 저장된다. `task_cache`는 `Ctx.memo/3`의 메모이즈 결과로, 재시도·재개로 노드가 재실행돼도 부수효과(LLM/툴)를 다시 돌리지 않게 체크포인트에 함께 영속된다.
 
 체크포인트 스키마(처음부터 동결되는 두 가지):
 

@@ -93,6 +93,7 @@ body {
 .event.done .kind { color: var(--ok); border-color: var(--ok); }
 .event .node { color: var(--accent); }
 .event .next { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.event .time { margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: 12px; }
 .event .payload-label { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin: 9px 0 4px; }
 .event .payload { margin: 0; padding: 8px 10px; background: var(--panel-2); border: 1px solid var(--border);
   border-radius: 8px; color: #ffe9c7; white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12.5px; }

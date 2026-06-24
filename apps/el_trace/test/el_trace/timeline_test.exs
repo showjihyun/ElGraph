@@ -54,6 +54,18 @@ defmodule ElTrace.TimelineTest do
     end
   end
 
+  describe "build/2 — 생성 시각(:at)" do
+    test "각 이벤트가 체크포인트 생성 시각(ms)을 담는다", %{cp: cp} do
+      graph = ask_graph()
+      {:interrupted, _} = ElGraph.invoke(graph, %{}, checkpointer: cp, thread_id: "t-at")
+
+      events = Timeline.build(cp, "t-at")
+
+      assert events != []
+      assert Enum.all?(events, &is_integer(&1.at))
+    end
+  end
+
   describe "build/2 — resilience" do
     test "skips checkpoints that vanish between list and get (no crash)" do
       assert Timeline.build({VanishingCP, :cfg}, "t") == []

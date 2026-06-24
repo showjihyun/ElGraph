@@ -120,6 +120,12 @@ defmodule ElGraph.DurabilityTest do
       assert {:ok, _} = ElGraph.invoke(linear_graph(), %{}, checkpointer: cp, thread_id: "t")
       assert length(ETS.list(config, "t")) == 4
     end
+
+    test "체크포인트에 생성 시각(created_at, ms)이 기록된다", %{cp: cp, config: config} do
+      assert {:ok, _} = ElGraph.invoke(linear_graph(), %{}, checkpointer: cp, thread_id: "t")
+      assert {:ok, %Checkpoint{created_at: at}} = ETS.get(config, "t", :latest)
+      assert is_integer(at)
+    end
   end
 
   describe ":exit" do

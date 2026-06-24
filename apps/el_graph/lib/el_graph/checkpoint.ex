@@ -20,7 +20,8 @@ defmodule ElGraph.Checkpoint do
             interrupted: nil,
             interrupts: %{},
             interrupt_info: nil,
-            task_cache: %{}
+            task_cache: %{},
+            created_at: nil
 
   @type t :: %__MODULE__{
           version: pos_integer(),
@@ -32,7 +33,8 @@ defmodule ElGraph.Checkpoint do
           interrupted: atom() | nil,
           interrupts: %{atom() => [term()]},
           interrupt_info: %{node: atom(), payload: term()} | nil,
-          task_cache: %{{atom(), term()} => term()}
+          task_cache: %{{atom(), term()} => term()},
+          created_at: integer() | nil
         }
 
   @doc """

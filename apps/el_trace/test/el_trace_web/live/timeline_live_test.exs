@@ -46,6 +46,8 @@ defmodule ElTraceWeb.TimelineLiveTest do
       assert html =~ "승인"
       assert html =~ "거절"
       assert html =~ "여기서 분기"
+      # step별 생성 시각(HH:MM:SS)이 표시된다
+      assert html =~ ~r/\d{2}:\d{2}:\d{2}/
     end
 
     test "the threads sidebar shows each thread's status badge + step", %{
