@@ -5,8 +5,8 @@
 
 상태: v0.9 (설계 검토 R1~R5 반영, M1~M4 완료 · M5 코어 완료) · 2026-06-13
 
-**구현 현황 요약**: 기본 스위트 629개(el_graph 524 + el_graph_web 52 + el_trace 47 + el_graph_req_llm 6) + DB 어댑터 55개(el_graph_ecto 28 + el_graph_redis 27, Postgres/Valkey 가용 시) + 통합 다수(실 OpenAI 등), 전부 `async: true`. 코어(L1) 런타임
-의존성 `:telemetry` 1개. 실 OpenAI로 도는 문서 Q&A 에이전트, 센서→버스→에이전트 체인,
+**구현 현황 요약**: 기본 스위트(el_graph 593 + el_graph_web 57 + el_trace 51 + el_graph_req_llm 9 등, 정확값은 `mix test`) + DB 어댑터(el_graph_ecto·el_graph_redis, Postgres/Valkey 가용 시) + 통합 다수(실 OpenAI 등), 전부 `async: true`. 코어 el_graph 런타임
+의존성은 흔한 라이브러리 5개(`:telemetry`·`:opentelemetry_api`·`:jason`·`:req`·`:nimble_options`) — 무거운 OTel SDK는 선택 앱 `el_graph_otel`. 실 OpenAI로 도는 문서 Q&A 에이전트, 센서→버스→에이전트 체인,
 2-에이전트 파이프라인이 동작 검증됨. 구현 로드맵·완료 기준은 §8, 실사용 관찰은 `DOGFOODING.md`.
 
 ---
@@ -26,7 +26,7 @@
 
 | 원칙 | 내용 |
 |---|---|
-| 의존성 최소화 | 코어(L1)의 런타임 의존성은 `:telemetry` 1개 (Elixir 1.18+ 내장 `JSON` 사용, telemetry는 M1 계측 요구와의 트레이드오프로 수용). L2부터 NimbleOptions, Req 등 최소 추가 |
+| 의존성 최소화 | 코어 그래프 엔진(L1)은 `:telemetry`만 요구한다. L2+(Action/LLM)가 `:nimble_options`·`:req`·`:jason`을, 관측이 api-only `:opentelemetry_api`를 더해 — el_graph 앱의 런타임 deps는 이 5개뿐(무거운 OTel SDK·exporter는 `el_graph_otel`로 분리). 모두 흔한 경량 라이브러리 |
 | Functional core, imperative shell | 그래프 정의·실행 루프는 순수 함수. 부수효과(LLM 호출, 체크포인트 영속화)는 behaviour 뒤로 |
 | 의존성 역전만 차용 | 클린아키텍처의 계층 구조는 도입하지 않는다. behaviour 기반 포트/어댑터(Checkpointer, Store, SignalTransport)만 차용 |
 | 프로세스는 런타임 이유가 있을 때만 | 노드는 순수 함수, 실행기는 호출(invocation)당 프로세스 1개. 노드별 GenServer 금지 |
@@ -346,7 +346,7 @@ SPEC 본문은 설계 시점 표기를 유지한다. 실제 구현이 본문과 
 
 **task 메모이제이션 (2026-06-16, durability+)**: `Ctx.memo(ctx, key, fun)` — 부수효과 있는 계산(LLM/툴 호출)을 `{node, key}`로 메모이즈한다. 결과는 실행 단위 ETS task 캐시에 기록되고 **체크포인트에 함께 영속**(`Checkpoint.task_cache`)되어, 재시도·인터럽트/크래시 재개로 노드가 처음부터 재실행돼도 `fun`을 다시 돌리지 않는다 — LLM 중복 호출 비용·중복 부수효과 차단(Temporal Activity / LangGraph `@task`에 해당). 캐시는 `resume`/`resume_from` 시 체크포인트에서 seed로 복원된다(구버전 체크포인트는 빈 캐시로 안전 처리). memo 값은 직렬화 가능해야 한다. 기존 부분실패 pending writes(형제 노드 보존)와 직교 — 이건 **노드 내부** 호출 단위 보존.
 
-**OTel 브리지 + Langfuse (2026-06-14)**: `ElGraph.OTel.Bridge` — telemetry span을 OpenTelemetry span으로 변환(`opentelemetry_telemetry`로 부모-자식 컨텍스트 관리, 속성은 `OTel.Mapping`의 GenAI semconv). `langfuse_otlp_config/3`이 Langfuse OTLP/HTTP exporter 설정(Basic auth + `x-langfuse-ingestion-version`)을 생성. **방침 확정**: Langfuse를 재구현하지 않고 OTLP 표준으로 연동 — 같은 OTel span이 Langfuse/Datadog/Jaeger 등 어느 백엔드로든 흐른다. **OTel SDK 분리 완료(2026-06-15)**: `ElGraph.OTel.Bridge`(+exporter/telemetry SDK 의존, langfuse 스크립트/테스트)를 별도 앱 **`el_graph_otel`**로 이동. 코어 el_graph는 무거운 SDK 3종(opentelemetry/exporter/telemetry)을 제거하고 **`telemetry` + `opentelemetry_api`(api-only, 컨텍스트 전파용)** 2개만 보유 — 무거운 SDK·exporter는 호스트가 el_graph_otel을 마운트할 때만 들어온다. 순수 매핑 `ElGraph.OTel.Mapping`은 코어 잔류. ~~한계: 병렬 노드(별도 Task)는 OTel 컨텍스트 자동 전파 안 됨(1차).~~ → **해소**: `Executor.exec_all`이 부모 OTel 컨텍스트를 캡처해 각 Task에서 `attach`하므로 병렬 노드 span이 invoke span 아래로 중첩된다(OTel 미사용 시 무비용). **실전송 검증 완료(2026-06-14)**: Langfuse self-host(docker-compose + headless init)로 `scripts/otel_langfuse.exs` 실행 → trace 1개 + observation 6개 도착. Langfuse가 `chat gpt-4o`를 GENERATION(model·토큰 정확), 노드를 TOOL, invoke를 SPAN으로 정확히 분류 — GenAI semconv 매핑이 실데이터로 검증됨. ReAct 루프(agent→tools→agent)가 중첩 trace로 표시.
+**OTel 브리지 + Langfuse (2026-06-14)**: `ElGraph.OTel.Bridge` — telemetry span을 OpenTelemetry span으로 변환(`opentelemetry_telemetry`로 부모-자식 컨텍스트 관리, 속성은 `OTel.Mapping`의 GenAI semconv). `langfuse_otlp_config/3`이 Langfuse OTLP/HTTP exporter 설정(Basic auth + `x-langfuse-ingestion-version`)을 생성. **방침 확정**: Langfuse를 재구현하지 않고 OTLP 표준으로 연동 — 같은 OTel span이 Langfuse/Datadog/Jaeger 등 어느 백엔드로든 흐른다. **OTel SDK 분리 완료(2026-06-15)**: `ElGraph.OTel.Bridge`(+exporter/telemetry SDK 의존, langfuse 스크립트/테스트)를 별도 앱 **`el_graph_otel`**로 이동. 코어 el_graph는 무거운 OTel SDK 3종(opentelemetry/exporter/telemetry)을 제거하고 api-only **`opentelemetry_api`**(컨텍스트 전파용)만 남긴다 — el_graph 런타임 deps는 `telemetry`·`opentelemetry_api`·`jason`·`req`·`nimble_options` 5개이며, 무거운 SDK·exporter는 호스트가 el_graph_otel을 마운트할 때만 들어온다. 순수 매핑 `ElGraph.OTel.Mapping`은 코어 잔류. ~~한계: 병렬 노드(별도 Task)는 OTel 컨텍스트 자동 전파 안 됨(1차).~~ → **해소**: `Executor.exec_all`이 부모 OTel 컨텍스트를 캡처해 각 Task에서 `attach`하므로 병렬 노드 span이 invoke span 아래로 중첩된다(OTel 미사용 시 무비용). **실전송 검증 완료(2026-06-14)**: Langfuse self-host(docker-compose + headless init)로 `scripts/otel_langfuse.exs` 실행 → trace 1개 + observation 6개 도착. Langfuse가 `chat gpt-4o`를 GENERATION(model·토큰 정확), 노드를 TOOL, invoke를 SPAN으로 정확히 분류 — GenAI semconv 매핑이 실데이터로 검증됨. ReAct 루프(agent→tools→agent)가 중첩 trace로 표시.
 
 **ElTrace 프로토타입 착수 (2026-06-14)**: Langfuse 관찰(도그푸딩 세션 8) 결과 "ElGraph가 체크포인트·버스로 아는 인과를 Langfuse는 모른다"는 4개 차별점을 데이터로 확정 — #1 인터럽트 가시성, #2 thread 생애(invoke→interrupt→resume), #3 멀티 에이전트 핸드오프, #4 time-travel 재개. 우선순위 #1·#2를 구현: `ElTrace.Timeline`(체크포인트 체인 → 생애 타임라인 + 텍스트 렌더). 선결로 `Checkpoint.interrupt_info`(node+payload)를 추가 — 동적 인터럽트가 기록하고 재개 후에도 보존(Langfuse가 못 보여준 "왜 멈췄나"의 데이터 소스). 시연: `scripts/eltrace_demo.exs`. **방침**: ElTrace는 범용 trace(span/토큰)를 재구현하지 않고 Langfuse에 위임 — 체크포인트가 아는 인과만 다룬다. **구조**: `lib/el_trace/`에 두되 ElGraph 의존은 Checkpointer behaviour뿐 — 별도 앱(`el_trace`) 분리에 유리.
 
